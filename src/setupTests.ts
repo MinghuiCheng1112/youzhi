@@ -27,15 +27,17 @@ afterEach(() => {
 })
 
 // 添加全局模拟
-global.matchMedia = global.matchMedia || function() {
+global.matchMedia = global.matchMedia || function(query: string) {
   return {
     matches: false,
+    media: query,
+    onchange: null,
     addListener: function() {},
     removeListener: function() {},
     addEventListener: function() {},
     removeEventListener: function() {},
-    dispatchEvent: function() {},
-  };
+    dispatchEvent: function() { return true; },
+  } as unknown as MediaQueryList;
 };
 
 // 模拟window.getComputedStyle
