@@ -1,0 +1,145 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+    'Noto Color Emoji';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.site-layout-content {
+  min-height: 280px;
+  padding: 24px;
+  background: #fff;
+}
+
+.logo {
+  float: left;
+  width: 120px;
+  height: 31px;
+  margin: 16px 24px 16px 0;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.ant-row-rtl .logo {
+  float: right;
+  margin: 16px 0 16px 24px;
+}
+
+.login-form {
+  max-width: 300px;
+  margin: 0 auto;
+}
+
+.login-form-button {
+  width: 100%;
+}
+
+.register-form {
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+@media (max-width: 768px) {
+  .site-layout-content {
+    padding: 12px;
+  }
+  
+  .ant-table {
+    width: 100%;
+    overflow-x: auto;
+  }
+}
+
+/* 添加表格横向滚动支持 */
+.ant-table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.ant-table {
+  position: relative;
+  width: 100%;
+}
+
+/* 强制所有表格启用固定表头 */
+.ant-table-thead {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 5 !important;
+  background: #fafafa !important;
+}
+
+.ant-table-thead > tr > th {
+  background: #fafafa !important;
+  font-weight: 600 !important;
+}
+
+/* 设置表格底部滚动条位置 */
+.ant-table-body {
+  max-height: calc(100vh - 250px) !important;
+  overflow-y: auto !important;
+  overflow-x: auto !important;
+  min-height: 100px;
+}
+
+/* 固定页面底部滚动条 */
+.ant-table-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 250px);
+  max-height: calc(100vh - 200px);
+  overflow: hidden;
+}
+
+/* 美化滚动条 */
+.ant-table-body::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.ant-table-body::-webkit-scrollbar-thumb {
+  background: #bfbfbf;
+  border-radius: 5px;
+}
+
+.ant-table-body::-webkit-scrollbar-track {
+  background: #f0f0f0;
+}
+
+/* 确保表格容器可以在小屏幕上滚动 */
+@media screen and (max-width: 1200px) {
+  .ant-table-wrapper {
+    overflow-x: auto !important;
+  }
+  
+  .ant-card {
+    overflow-x: auto;
+  }
+}
+
+/* 标签紧凑样式 */
+.ant-tag {
+  margin-right: 1px !important;
+  margin-bottom: 1px !important;
+  padding: 0 4px !important;
+  line-height: 1.5 !important;
+}
+
+/* 补充资料标签样式 */
+[data-column-key="station_management"] .ant-tag {
+  display: inline-block !important;
+  white-space: nowrap !important;
+}
+
+/* 标签容器样式 */
+[data-column-key="station_management"] > div > div {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  overflow: hidden !important;
+}

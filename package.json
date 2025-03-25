@@ -1,0 +1,49 @@
+{
+  "name": "customer-management-system",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --skipLibCheck --noEmit && vite build",
+    "vercel-build": "node vercel-build.js",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "preview": "vite preview",
+    "test": "vitest",
+    "auto-dispatch": "node --experimental-modules scripts/auto_dispatch_date.js"
+  },
+  "dependencies": {
+    "@ant-design/charts": "^2.2.1",
+    "@ant-design/icons": "^5.0.1",
+    "antd": "^5.12.5",
+    "dayjs": "^1.11.10",
+    "node-fetch": "^3.3.2",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-draggable": "^4.4.6",
+    "react-query": "^3.39.3",
+    "react-router-dom": "^6.21.1",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@supabase/supabase-js": "^2.49.1",
+    "@testing-library/jest-dom": "^6.1.5",
+    "@testing-library/react": "^14.1.2",
+    "@testing-library/user-event": "^14.5.1",
+    "@types/lodash": "^4.17.16",
+    "@types/react": "^18.2.43",
+    "@types/react-dom": "^18.2.17",
+    "@typescript-eslint/eslint-plugin": "^6.14.0",
+    "@typescript-eslint/parser": "^6.14.0",
+    "@vitejs/plugin-react": "^4.2.1",
+    "dotenv": "^16.4.7",
+    "eslint": "^8.55.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.4.5",
+    "jsdom": "^23.0.1",
+    "pg": "^8.14.1",
+    "typescript": "^5.2.2",
+    "vite": "^6.2.2",
+    "vitest": "^3.0.9"
+  }
+}
