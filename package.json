@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc --skipLibCheck --noEmit && vite build",
     "vercel-build": "node vercel-build.js",
+    "vercel-simple-build": "vite build --mode production",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "test": "vitest",
