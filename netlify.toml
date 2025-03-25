@@ -1,0 +1,12 @@
+[build]
+  command = "npm run netlify-build"
+  publish = "dist"
+  
+[build.environment]
+  NODE_VERSION = "18"
+
+# 确保SPA路由正常工作
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200 

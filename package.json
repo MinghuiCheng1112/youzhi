@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --skipLibCheck --noEmit && vite build",
+    "netlify-build": "node netlify-env-check.js && npm run build && node copy-env-script.js",
     "vercel-build": "node vercel-env-check.js && vite build --mode production",
     "vercel-debug-build": "node vercel-build.js",
     "vercel-simple-build": "vite build --mode production",
