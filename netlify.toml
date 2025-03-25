@@ -10,3 +10,19 @@
   from = "/*"
   to = "/index.html"
   status = 200 
+  
+# 添加正确的内容类型头
+[[headers]]
+  for = "/*.js"
+  [headers.values]
+    Content-Type = "application/javascript"
+
+[[headers]]
+  for = "/*.mjs"
+  [headers.values]
+    Content-Type = "application/javascript"
+
+[[headers]]
+  for = "/assets/*.js"
+  [headers.values]
+    Content-Type = "application/javascript" 

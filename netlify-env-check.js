@@ -16,14 +16,21 @@ console.log(`SUPABASE_ANON_KEY 是否存在: ${!!process.env.SUPABASE_ANON_KEY}`
 
 // 确保React应用能访问环境变量
 try {
-  writeFileSync('./netlify-env.js', `
+  // 创建一个普通JavaScript文件而不是模块
+  const scriptContent = `
 // 这个文件由netlify-env-check.js生成
 window.ENV = {
   VITE_SUPABASE_URL: "${supabaseUrl || ''}",
   VITE_SUPABASE_ANON_KEY: "${supabaseKey || ''}",
   VITE_DEPLOY_ENV: "production"
 };
-`);
+`;
+
+  writeFileSync('./netlify-env.js', scriptContent, {
+    encoding: 'utf8',
+    flag: 'w'
+  });
+  
   console.log('✅ 已创建netlify-env.js文件');
 } catch (error) {
   console.error('❌ 创建环境变量文件失败:', error);
