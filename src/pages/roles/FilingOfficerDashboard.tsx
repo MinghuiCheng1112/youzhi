@@ -177,21 +177,6 @@ const FilingOfficerDashboard = () => {
     // 如果搜索为空，返回所有数据
     if (!value.trim()) return data;
     
-    // 检查是否是精准搜索模式（使用双引号或单引号包围）
-    const isExactMatch = /^["'].*["']$/.test(value.trim());
-    
-    // 如果是精准搜索，移除引号得到真正的搜索内容
-    const exactSearchText = isExactMatch ? value.trim().slice(1, -1) : '';
-    
-    // 如果是精准搜索，直接按客户姓名完全匹配
-    if (isExactMatch) {
-      console.log('使用精准搜索模式:', exactSearchText);
-      return data.filter(customer => 
-        customer.customer_name === exactSearchText
-      );
-    }
-    
-    // 否则使用常规的模糊搜索
     // 支持逗号或空格分隔的多个关键字
     const keywords = value.toLowerCase().split(/[\s,，]+/).filter(k => k.trim() !== '');
     
@@ -199,18 +184,23 @@ const FilingOfficerDashboard = () => {
     if (keywords.length === 0) return data;
     
     return data.filter(customer => {
-      // 将客户的各字段合并为一个字符串，用于模糊匹配
-      const customerInfo = [
-        customer.customer_name,
-        customer.phone,
-        customer.address,
-        customer.id_card,
-        customer.salesman,
-        customer.construction_team
-      ].filter(Boolean).join(' ').toLowerCase();
+      const customerName = (customer.customer_name || '').toLowerCase();
+      const phone = (customer.phone || '').toLowerCase();
+      const address = (customer.address || '').toLowerCase();
+      const idCard = (customer.id_card || '').toLowerCase();
+      const salesman = (customer.salesman || '').toLowerCase();
+      const constructionTeam = (customer.construction_team || '').toLowerCase();
       
-      // 只要有一个关键字匹配，就返回此客户
-      return keywords.some(keyword => customerInfo.includes(keyword));
+      // 每个关键词都要求精准匹配各个字段
+      // 例如，输入"张三"会匹配姓名为"张三"而不是"张三丰"的客户
+      return keywords.some(keyword => 
+        customerName === keyword || 
+        phone === keyword || 
+        address === keyword || 
+        idCard === keyword || 
+        salesman === keyword || 
+        constructionTeam === keyword
+      );
     });
   }
 
@@ -476,7 +466,7 @@ const FilingOfficerDashboard = () => {
               allowClear
             />
             <Text type="secondary" style={{ fontSize: '12px' }}>
-              提示: 用引号包围客户姓名可进行精准匹配，如 "张三"
+              提示: 默认精准匹配，多个关键词请用空格或逗号分隔
             </Text>
           </Space>
           <Text>

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react'
-import { Table, Button, Input, Space, message, Modal, Tag, Tooltip, Typography, Upload, Drawer, Divider, Select, DatePicker, Form, Radio, InputNumber } from 'antd'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import { Table, Button, Input, Space, message, Modal, Tag, Tooltip, Typography, Upload, Drawer, Divider, Select, DatePicker, Form, Radio, InputNumber, Dropdown, Menu } from 'antd'
 import { 
   PlusOutlined, 
   SearchOutlined, 
@@ -11,10 +11,11 @@ import {
   FileExcelOutlined,
   CloseCircleOutlined,
   CheckCircleOutlined,
-  RollbackOutlined
+  RollbackOutlined,
+  DownOutlined
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
-import { customerApi, constructionTeamApi, surveyorApi } from '../services/api'
+import { customerApi, constructionTeamApi, surveyorApi, dataCacheService } from '../services/api'
 import { Customer, ImportResult } from '../types'
 import * as XLSX from 'xlsx'
 import { useAuth } from '../contexts/AuthContext'
@@ -47,6 +48,11 @@ const CustomerList = () => {
   const [editForm] = Form.useForm()
   const navigate = useNavigate()
   const { userRole } = useAuth()
+  // 添加分页相关状态
+  const [pageSize, setPageSize] = useState<number>(100)
+  const [currentPage, setCurrentPage] = useState<number>(1)
+  const [totalPages, setTotalPages] = useState<number>(1)
+  
   const STATION_MANAGEMENT_OPTIONS = [
     { value: '房产证', label: '房产证', color: 'blue' },
     { value: '授权书', label: '授权书', color: 'purple' },
@@ -60,6 +66,7 @@ const CustomerList = () => {
   // 定义图纸变更选项
   const DRAWING_CHANGE_OPTIONS = [
     { value: '无变更', label: '无变更', color: 'default' },
+    { value: '已出图', label: '已出图', color: 'green' },
     { value: '变更1', label: '变更1', color: 'blue' },
     { value: '变更2', label: '变更2', color: 'purple' },
     { value: '变更3', label: '变更3', color: 'orange' },
@@ -83,20 +90,50 @@ const CustomerList = () => {
       // 获取所有客户
       const data = await customerApi.getAll()
       
-      // 应用计算字段
+      // 应用计算字段并确保waiting格式的建设验收数据正确处理
       const processedData = data.map(customer => {
+        // 处理计算字段
+        let processedCustomer = { ...customer };
         if (customer.module_count && customer.module_count > 0) {
-          const calculatedFields = calculateAllFields(customer.module_count)
-          return {
-            ...customer,
+          const calculatedFields = calculateAllFields(customer.module_count);
+          processedCustomer = {
+            ...processedCustomer,
             ...calculatedFields
+          };
+        }
+        
+        // 特殊处理construction_acceptance字段，确保waiting格式在刷新后保留
+        if (typeof customer.construction_acceptance === 'string') {
+          // 如果以前是waiting格式但被后端误处理为日期字符串，尝试恢复
+          if (customer.construction_acceptance_notes && 
+              customer.construction_acceptance_notes.includes('等待中')) {
+            // 从notes中提取等待天数
+            const waitingMatch = customer.construction_acceptance_notes.match(/等待\s*(\d+)\s*天/);
+            const waitDays = waitingMatch ? parseInt(waitingMatch[1], 10) : 7;
+            
+            // 使用setDate提取原始日期或使用当前日期
+            let startDate = dayjs();
+            try {
+              if (dayjs(customer.construction_acceptance_date).isValid()) {
+                startDate = dayjs(customer.construction_acceptance_date);
+              }
+            } catch (error) {
+              console.warn('无法解析验收日期，使用当前日期');
+            }
+            
+            // 重新构造waiting格式
+            processedCustomer.construction_acceptance = `waiting:${waitDays}:${startDate.format('YYYY-MM-DD')}`;
+            console.log(`恢复客户(${customer.id})的等待状态: ${processedCustomer.construction_acceptance}`);
           }
         }
-        return customer
-      })
+        
+        return processedCustomer;
+      });
       
       setCustomers(processedData)
       setFilteredCustomers(processedData)
+      setTotalPages(Math.ceil(processedData.length / pageSize)) // 更新总页数
+      setCurrentPage(1) // 重置到第一页
       
       // 先从已有客户中提取业务员信息
       const salesmen = new Map<string, string>()
@@ -310,61 +347,61 @@ const CustomerList = () => {
     }
   };
 
-  // 搜索功能
-  const handleSearch = (value: string) => {
-    setSearchText(value)
+  // 优化的搜索函数
+  const performSearch = (value: string) => {
+    // 如果搜索为空，直接返回所有数据
     if (!value.trim()) {
-      setFilteredCustomers(customers)
-      return
+      setFilteredCustomers(customers);
+      setTotalPages(Math.ceil(customers.length / pageSize));
+      return;
     }
 
-    // 将搜索文本按空格或逗号分割成多个关键词
-    const keywords = value.toLowerCase().split(/[\s,，]+/).filter(keyword => keyword.trim() !== '')
+    // 支持空格或逗号分隔的多关键词搜索
+    const keywords = value.toLowerCase()
+      .split(/[\s,，]+/) // 按空格或中英文逗号分隔
+      .filter(keyword => keyword.trim() !== ''); // 过滤掉空字符串
     
-    // 如果没有有效关键词，显示所有客户
-    if (keywords.length === 0) {
-      setFilteredCustomers(customers)
-      return
-    }
-    
-    console.log('搜索关键词:', keywords, '客户总数:', customers.length)
-
-    // 模糊搜索 - 匹配任意一个关键词
+    // 使用高效的单次遍历过滤
     const filtered = customers.filter(customer => {
-      // 安全地检查字段是否包含关键词
-      const safeIncludes = (fieldValue: any, keyword: string): boolean => {
-        if (fieldValue === null || fieldValue === undefined) return false
-        return String(fieldValue).toLowerCase().includes(keyword)
-      }
+      // 只检查最重要的几个字段，减少遍历次数
+      const name = (customer.customer_name || '').toLowerCase();
+      const phone = (customer.phone || '').toLowerCase();
+      const address = (customer.address || '').toLowerCase();
+      const salesman = (customer.salesman || '').toLowerCase();
+      const idCard = (customer.id_card || '').toLowerCase();
+      const meterNumber = (customer.meter_number || '').toLowerCase();
       
-      // 对每个关键词进行检查，任一关键词匹配即返回true
-      return keywords.some(keyword => {
-        if (!keyword) return false
-        
-        // 尝试搜索客户中的所有可能字段
-        for (const key in customer) {
-          // 跳过id和创建时间等非搜索字段
-          if (key === 'id' || key === 'created_at' || key === 'updated_at') continue;
-          
-          const value = (customer as any)[key];
-          if (safeIncludes(value, keyword)) {
-            console.log(`匹配到字段 ${key}:`, value);
-            return true;
-          }
-        }
-        
-        return false;
-      })
-    })
+      // 对每个关键词进行检查，只要有一个关键词匹配任何字段就返回true
+      return keywords.some(keyword => 
+        name.includes(keyword) || 
+        phone.includes(keyword) || 
+        address.includes(keyword) || 
+        salesman.includes(keyword) ||
+        idCard.includes(keyword) ||
+        meterNumber.includes(keyword)
+      );
+    });
     
-    console.log(`搜索结果: ${filtered.length}条记录`)
-    setFilteredCustomers(filtered)
+    setFilteredCustomers(filtered);
+    setTotalPages(Math.ceil(filtered.length / pageSize));
     
-    // 如果没有搜索结果，显示提示
-    if (filtered.length === 0) {
-      message.info(`未找到匹配"${value}"的客户记录`)
+    // 只在真正需要时显示消息，且仅在用户显式触发搜索时（通过handleSearch函数）
+    if (filtered.length === 0 && customers.length > 0 && value.length > 0) {
+      // 消息显示逻辑移至handleSearch函数
     }
-  }
+  };
+  
+  // 使用立即处理的方式代替防抖，避免延迟
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setSearchText(value);
+    
+    // 只有在输入长度大于1或为空时才触发搜索，避免单个字符时的频繁搜索
+    // 但不显示未找到的提示，只在用户主动搜索时才显示
+    if (value.length > 1 || !value) {
+      performSearch(value);
+    }
+  };
 
   // 判断单元格是否处于编辑状态
   const isEditing = (record: Customer, dataIndex: string) => {
@@ -418,230 +455,154 @@ const CustomerList = () => {
     setEditingCell(null);
   };
 
-  // 保存编辑
-  const save = async (id: string) => {
+  /**
+   * 保存编辑的单元格数据
+   * @param {string} id - 客户ID
+   */
+  const saveEditedCell = async (id: string) => {
+    if (!editingCell) return;
+    
     try {
-      if (!id) {
+      // 验证表单字段
+      const values = await editForm.validateFields();
+      console.log('验证通过的编辑数据:', values);
+      console.log('当前编辑单元格:', editingCell);
+      
+      // 创建更新对象
+      const updateData: any = {};
+      
+      // 添加被编辑的字段
+      updateData[editingCell.dataIndex] = values[editingCell.dataIndex];
+      
+      // 特别处理module_count字段
+      if (editingCell.dataIndex === 'module_count') {
+        const moduleCountValue = values.module_count;
+        console.log('处理module_count值:', moduleCountValue, '类型:', typeof moduleCountValue);
+        
+        // 如果为空字符串或undefined，设置为null
+        if (moduleCountValue === '' || moduleCountValue === undefined) {
+          // 当组件数量为空时，相关字段也设置为空值
+          updateData.module_count = null;
+          updateData.capacity = null;
+          updateData.investment_amount = null;
+          updateData.land_area = null;
+          console.log('将module_count及相关字段的值转换为null');
+        } else if (typeof moduleCountValue === 'string') {
+          // 如果是字符串，尝试转换为数字
+          const numValue = Number(moduleCountValue);
+          if (!isNaN(numValue)) {
+            updateData.module_count = numValue;
+            console.log('将module_count字符串转换为数字:', moduleCountValue, '->', numValue);
+            
+            // 如果是有效数字，计算相关字段
+            if (numValue > 0) {
+              const calculatedFields = calculateAllFields(numValue);
+              Object.assign(updateData, calculatedFields);
+              console.log('自动计算相关字段:', calculatedFields);
+              } else {
+              // 如果组件数量为0，相关字段也设置为空值
+              updateData.capacity = null;
+              updateData.investment_amount = null;
+              updateData.land_area = null;
+              console.log('组件数量为0，相关字段设置为null');
+              }
+            } else {
+            // 无效的数字字符串，组件数量及相关字段都设置为null
+            updateData.module_count = null;
+            updateData.capacity = null;
+            updateData.investment_amount = null;
+            updateData.land_area = null;
+            console.log('将module_count无效字符串及相关字段转换为null:', moduleCountValue);
+          }
+        } else if (typeof moduleCountValue === 'number') {
+          // 如果已经是数字类型，且是有效数字，计算相关字段
+          if (!isNaN(moduleCountValue) && moduleCountValue > 0) {
+            const calculatedFields = calculateAllFields(moduleCountValue);
+            Object.assign(updateData, calculatedFields);
+            console.log('数字类型，自动计算相关字段:', calculatedFields);
+          } else {
+            // 数字为0或NaN，相关字段也设置为空值
+            updateData.capacity = null;
+            updateData.investment_amount = null;
+            updateData.land_area = null;
+            console.log('组件数量为0或NaN，相关字段设置为null');
+          }
+        }
+      }
+      
+      // 特殊处理图纸变更字段
+      if (editingCell.dataIndex === 'drawing_change') {
+        if (values.drawing_change === undefined || values.drawing_change === '') {
+          updateData.drawing_change = '无变更';
+        }
+      }
+      
+      // 记录将发送到API的数据
+      console.log('将发送到API的更新数据:', updateData);
+      
+      // 使用缓存服务更新数据
+      const updatedCustomer = customerApi.updateWithCache(id, updateData);
+      
+      // 查找当前编辑客户的索引
+      const index = customers.findIndex(customer => customer.id === id);
+      const filteredIndex = filteredCustomers.findIndex(customer => customer.id === id);
+      
+      if (index > -1) {
+        // 更新本地状态
+        const newCustomers = [...customers];
+        newCustomers[index] = { ...newCustomers[index], ...updateData };
+        setCustomers(newCustomers);
+      }
+      
+      if (filteredIndex > -1) {
+        // 更新筛选后的数据
+        const newFilteredCustomers = [...filteredCustomers];
+        newFilteredCustomers[filteredIndex] = { ...newFilteredCustomers[filteredIndex], ...updateData };
+        setFilteredCustomers(newFilteredCustomers);
+      }
+      
+      // 退出编辑状态
+      setEditingCell(null);
+      
+      // 显示成功消息
+      message.success('数据已更新');
+    } catch (error) {
+      console.error('保存编辑数据失败:', error);
+      message.error('保存失败，请重试');
+    }
+  };
+
+  // 修改可编辑日期单元格中的handleDateChange函数
+  const handleDateChange = async (date: any, record: Customer, dataIndex: string) => {
+    try {
+      if (!record.id) {
         console.error('保存错误: 无效的记录ID');
         message.error('保存失败: 记录标识无效');
         return;
       }
-
-      const values = await editForm.validateFields();
-      setLoading(true);
-
-      if (editingCell) {
-        let dataToUpdate: any = {};
-        
-        // 特殊处理补充资料字段
-        if (editingCell.dataIndex === 'station_management') {
-          // 处理补充资料选项
-          if (values.station_management && values.station_management.length > 0) {
-            // 用户选择了一个或多个选项，将其作为数组保存
-            dataToUpdate.station_management = values.station_management;
-          } else {
-            // 如果没有选择任何选项，则生成当前时间戳
-            dataToUpdate.station_management = [new Date().toISOString()];
-          }
-        }
-        // 处理日期类型字段
-        else if (editingCell.dataIndex === 'register_date' || editingCell.dataIndex === 'filing_date') {
-          try {
-            // 确保日期值有效且可以被转换
-            if (values[editingCell.dataIndex]) {
-              const dateValue = values[editingCell.dataIndex];
-              console.log('保存日期字段:', editingCell.dataIndex, '原始值:', dateValue);
-              
-              if (dateValue.isValid && dateValue.isValid()) {
-                // 直接使用YYYY-MM-DD格式存储日期字符串
-                const dateStr = dateValue.format('YYYY-MM-DD');
-                console.log('使用简单日期字符串:', dateStr);
-                dataToUpdate[editingCell.dataIndex] = dateStr;
-              } else {
-                // 如果是无效日期格式，设置为当前日期
-                const currentDate = dayjs().format('YYYY-MM-DD');
-                console.log('日期无效，使用当前日期:', currentDate);
-                dataToUpdate[editingCell.dataIndex] = currentDate;
-                message.warning(`${editingCell.dataIndex === 'register_date' ? '登记日期' : '备案日期'}格式无效，已设置为当前日期`);
-              }
-            } else {
-              console.log('日期值为空，设置为null');
-              dataToUpdate[editingCell.dataIndex] = null;
-            }
-          } catch (error) {
-            console.error("处理日期数据错误:", error);
-            // 发生错误时设置为当前日期
-            const errorDate = dayjs().format('YYYY-MM-DD');
-            console.log('处理日期出错，使用当前日期:', errorDate);
-            dataToUpdate[editingCell.dataIndex] = errorDate;
-            message.warning(`${editingCell.dataIndex === 'register_date' ? '登记日期' : '备案日期'}处理出错，已设为当前日期`);
-          }
-        }
-        // 处理价格字段
-        else if (editingCell.dataIndex === 'price') {
-          // 如果价格为空字符串，将其转换为null
-          const priceValue = values.price?.trim ? values.price.trim() : values.price;
-          if (priceValue === '' || priceValue === undefined) {
-            dataToUpdate.price = null;
-          } else {
-            // 尝试转换为数字
-            const numValue = Number(priceValue);
-            if (isNaN(numValue)) {
-              message.error('价格必须是有效的数字');
-              return;
-            }
-            dataToUpdate.price = numValue;
-          }
-        }
-        // 处理图纸变更字段
-        else if (editingCell.dataIndex === 'drawing_change') {
-          // 强制将图纸变更值转换为字符串类型
-          let changeValue = '';
-          
-          if (values.drawing_change === null || values.drawing_change === undefined) {
-            changeValue = '无变更';
-          } else if (typeof values.drawing_change === 'boolean') {
-            changeValue = values.drawing_change ? '变更1' : '无变更';
-          } else {
-            // 确保是字符串
-            changeValue = String(values.drawing_change);
-            // 如果是空字符串，设为默认值
-            if (!changeValue.trim()) {
-              changeValue = '无变更';
-            }
-          }
-          
-          console.log('保存图纸变更值类型:', typeof changeValue, '值:', changeValue);
-          // 确保传递的是字符串
-          dataToUpdate.drawing_change = changeValue;
-        }
-        // 如果修改的是业务员，同步更新业务员电话
-        else if (editingCell.dataIndex === 'salesman') {
-          const salesmanValue = values.salesman;
-          
-          // 处理空值情况
-          if (salesmanValue === '' || salesmanValue === undefined || salesmanValue === null) {
-            console.log('清空业务员信息');
-            dataToUpdate = {
-              salesman: null, // 明确设置为null，确保数据库能识别为空值
-              salesman_phone: null // 同时清空业务员电话
-            };
-          } else {
-            // 查找业务员电话
-            const salesmanPhone = salesmenList.find(s => s.name === salesmanValue)?.phone || '';
-            
-            dataToUpdate = {
-              salesman: salesmanValue,
-              salesman_phone: salesmanPhone
-            };
-            
-            console.log(`匹配到业务员 ${salesmanValue} 的电话: ${salesmanPhone || '无'}`);
-          }
-          
-          console.log('更新业务员:', dataToUpdate.salesman, '电话:', dataToUpdate.salesman_phone);
-        }
-        // 如果修改的是施工队，根据需要设置或清空派工日期
-        else if (editingCell.dataIndex === 'construction_team') {
-          const constructionTeam = values.construction_team;
-          
-          // 处理空值情况
-          if (constructionTeam === '' || constructionTeam === undefined || constructionTeam === null) {
-            console.log('清空施工队信息');
-            dataToUpdate = {
-              construction_team: null, // 明确设置为null，确保数据库能识别为空值
-              construction_team_phone: null // 同时清空施工队电话
-            };
-          } else {
-            // 查找施工队电话
-            const teamPhone = constructionTeams.find(team => team.name === constructionTeam)?.phone || '';
-            
-            // 手动处理施工队电话，不再依赖数据库触发器
-            dataToUpdate = {
-              construction_team: constructionTeam,
-              construction_team_phone: teamPhone
-            };
-            
-            console.log(`匹配到施工队 ${constructionTeam} 的电话: ${teamPhone || '无'}`);
-          }
-          
-          console.log('更新施工队:', dataToUpdate.construction_team, '电话:', dataToUpdate.construction_team_phone);
-        }
-        // 如果修改的是踏勘员，同步更新踏勘员电话
-        else if (editingCell.dataIndex === 'surveyor') {
-          const surveyor = values.surveyor;
-          
-          // 处理空值情况
-          if (surveyor === '' || surveyor === undefined || surveyor === null) {
-            console.log('清空踏勘员信息');
-            dataToUpdate = {
-              surveyor: null, // 明确设置为null，确保数据库能识别为空值
-              surveyor_phone: null // 同时清空踏勘员电话
-            };
-          } else {
-            // 查找踏勘员电话
-            const surveyorPhone = surveyors.find(s => s.name === surveyor)?.phone || '';
-            
-            dataToUpdate = {
-              surveyor: surveyor,
-              surveyor_phone: surveyorPhone
-            };
-            
-            console.log(`匹配到踏勘员 ${surveyor} 的电话: ${surveyorPhone || '无'}`);
-          }
-          
-          console.log('更新踏勘员:', dataToUpdate.surveyor, '电话:', dataToUpdate.surveyor_phone);
-        }
-        // 如果修改的是公司字段
-        else if (editingCell.dataIndex === 'company') {
-          // 确保公司字段值符合数据库约束
-          let companyValue = values.company;
-          if (companyValue !== '昊尘' && companyValue !== '祐之') {
-            companyValue = '昊尘'; // 默认值
-          }
-          
-          dataToUpdate = {
-            company: companyValue
-          };
-          
-          console.log('更新公司:', companyValue);
-        }
-        // 常规字段处理
-        else {
-          dataToUpdate = {
-            [editingCell.dataIndex]: values[editingCell.dataIndex]
-          };
-        }
-        
-        // 特殊处理组件数量字段，自动计算相关字段
-        if (editingCell.dataIndex === 'module_count' && values.module_count) {
-          const moduleCount = Number(values.module_count);
-          if (!isNaN(moduleCount) && moduleCount > 0) {
-            const calculatedFields = calculateAllFields(moduleCount);
-            dataToUpdate = {
-              ...dataToUpdate,
-              ...calculatedFields
-            };
-          }
-        }
-        
-        console.log('发送到API的更新数据:', JSON.stringify(dataToUpdate));
-        try {
-          await customerApi.update(id, dataToUpdate)
-          fetchCustomers()
-          message.success('更新成功')
-        } catch (error) {
-          console.error('更新失败:', error)
-          message.error('更新失败')
-        }
+      
+      // 准备更新数据
+      const dataToUpdate = {
+        [dataIndex]: date ? date.toISOString() : null
+      };
+      
+      // 使用数据缓存服务更新数据
+      const updatedCustomer = customerApi.updateWithCache(record.id, dataToUpdate);
+      
+      // 更新本地状态
+      setCustomers(prev => 
+        prev.map(customer => (customer.id === record.id ? { ...customer, ...updatedCustomer } : customer))
+      );
+      setFilteredCustomers(prev => 
+        prev.map(customer => (customer.id === record.id ? { ...customer, ...updatedCustomer } : customer))
+      );
         
         // 退出编辑状态
-        setEditingCell(null)
-      }
+      setEditingCell(null);
+      message.success('日期更新成功');
     } catch (error) {
-      console.error('保存错误:', error)
-      message.error('保存失败')
-    } finally {
-      setLoading(false)
+      console.error('更新日期失败:', error);
+      message.error('更新失败');
     }
   };
 
@@ -655,16 +616,21 @@ const CustomerList = () => {
       cancelText: '取消',
       onOk: async () => {
         try {
-          await customerApi.delete(id)
-          message.success('客户删除成功')
-          fetchCustomers()
+          // 使用数据缓存服务删除客户（前端立即删除，后台静默处理）
+          customerApi.deleteWithCache(id);
+          
+          // 更新本地状态
+          setCustomers(prev => prev.filter(customer => customer.id !== id));
+          setFilteredCustomers(prev => prev.filter(customer => customer.id !== id));
+          
+          message.success('客户删除成功');
         } catch (error) {
-          message.error('删除客户失败')
-          console.error(error)
+          message.error('删除客户失败');
+          console.error(error);
         }
       }
-    })
-  }
+    });
+  };
 
   // 导出客户数据
   const handleExport = () => {
@@ -812,7 +778,7 @@ const CustomerList = () => {
           filing_date: row['备案日期'] ? dayjs(row['备案日期']).format() : null,
           meter_number: row['电表号码'] || '',
           designer: row['设计师'] || '',
-          module_count: parseInt(row['组件数量']) || 1, // 默认为1，避免0值导致计算错误
+          module_count: row['组件数量'] ? parseInt(row['组件数量']) : null, // 允许组件数量为空
           status: row['状态'] || '待处理',
           company: row['公司'] === '昊尘' ? 'haoChen' : (row['公司'] === '祐之' ? 'youZhi' : 'haoChen') // 默认为昊尘
         }
@@ -905,10 +871,10 @@ const CustomerList = () => {
         rules={required ? [{ required: true, message: `请输入${title}` }] : []}
       >
         <Input 
-          onPressEnter={() => record.id && save(record.id)} 
+          onPressEnter={() => record.id && saveEditedCell(record.id)} 
           placeholder={required ? `请输入${title}` : `${title}(可选)`}
           autoFocus
-          onBlur={() => record.id && save(record.id)}
+          onBlur={() => record.id && saveEditedCell(record.id)}
           allowClear={!required}
         />
       </Form.Item>
@@ -974,7 +940,7 @@ const CustomerList = () => {
           showSearch
           optionFilterProp="label"
           options={options}
-          onBlur={() => record.id && save(record.id)}
+          onBlur={() => record.id && saveEditedCell(record.id)}
           onSelect={(value) => {
             if (dataIndex === 'salesman') {
               const phone = options.find(o => o.value === value)?.phone || '';
@@ -1101,7 +1067,7 @@ const CustomerList = () => {
           allowClear
           style={{ width: '100%' }}
           options={options}
-          onBlur={() => record.id && save(record.id)}
+          onBlur={() => record.id && saveEditedCell(record.id)}
         />
       </Form.Item>
     ) : (
@@ -1157,7 +1123,7 @@ const CustomerList = () => {
     );
   };
 
-  // 添加可编辑日期选择单元格组件 - 重写版本
+  // 可编辑日期单元格
   const EditableDateCell = ({ value, record, dataIndex, title }: { 
     value: any; 
     record: Customer; 
@@ -1167,66 +1133,24 @@ const CustomerList = () => {
     const editable = isEditing(record, dataIndex);
     const [hover, setHover] = useState(false);
     
-    // 安全地转换日期值，避免无效日期导致错误
-    const safeDate = useMemo(() => {
+    // 安全地转换日期值为dayjs对象
+    let safeDate = null;
+    if (value) {
       try {
-        // 确保值存在且可以被dayjs解析
-        if (value && dayjs(value).isValid()) {
-          return dayjs(value);
-        }
-        return null;
-      } catch (e) {
-        console.error("日期解析错误:", e);
-        return null;
-      }
-    }, [value]);
-    
-    const handleEdit = () => {
-      try {
-        if (editingCell === null) {
-          edit(record, dataIndex);
-        }
-      } catch (e) {
-        console.error("编辑日期字段错误:", e);
-        message.error("编辑日期失败，请刷新页面重试");
-      }
-    };
-    
-    // 完全改写的保存方法
-    const handleDateChange = async (date: any) => {
-      if (!date) return;
-      
-      console.log(`修改${title}:`, date);
-      try {
-        setLoading(true);
-        
-        // 直接构建更新对象
-        const updateObj = {
-          [dataIndex]: date.toISOString()
-        };
-        
-        console.log('发送更新请求:', updateObj);
-        
-        // 直接调用API
-        if (record.id) {
-          const result = await customerApi.update(record.id, updateObj);
-          console.log('更新结果:', result);
-          
-          message.success(`${title}更新成功`);
-          setEditingCell(null); // 退出编辑状态
-          
-          // 更新本地数据
-          fetchCustomers();
-        } else {
-          console.error('记录ID无效，无法更新');
-          message.error('保存失败: 无效的记录');
+        safeDate = dayjs(value);
+        if (!safeDate.isValid()) {
+          safeDate = null;
         }
       } catch (error) {
-        console.error('保存日期失败:', error);
-        message.error(`保存${title}失败`);
-      } finally {
-        setLoading(false);
+        console.error(`解析${title}错误:`, error);
+        safeDate = null;
       }
+    }
+    
+    // 打开编辑模式
+    const handleEdit = () => {
+      if (editingCell !== null) return; // 如果已经在编辑其他单元格，则不执行
+          edit(record, dataIndex);
     };
     
     return editable ? (
@@ -1235,7 +1159,7 @@ const CustomerList = () => {
         format="YYYY-MM-DD"
         defaultValue={safeDate}
         open={true} // 自动打开日期选择器
-        onChange={handleDateChange} // 选择日期时就保存
+        onChange={(date) => handleDateChange(date, record, dataIndex)} // 选择日期时就保存
         onBlur={() => setEditingCell(null)} // 失焦时退出编辑
       />
     ) : (
@@ -1503,17 +1427,31 @@ const CustomerList = () => {
           'volcano': { borderColor: '#fa541c', color: '#fa541c' }
         };
         
+        // 显示图纸变更选项下拉菜单
+        const menu = (
+          <Menu onClick={({ key }) => record.id && handleDrawingChangeClick(record.id, key as string)}>
+            {DRAWING_CHANGE_OPTIONS.map(option => (
+              <Menu.Item key={option.value}>
+                <Tag color={option.color} style={{ margin: 0 }}>
+                  {option.label}
+                </Tag>
+              </Menu.Item>
+            ))}
+          </Menu>
+        );
+        
         return (
           <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <Dropdown overlay={menu} trigger={['click']}>
               <Button 
               ghost
               type={btnTypeMap[option.color] || 'default'}
               style={btnStyleMap[option.color] || {}}
                 size="small"
-              onClick={() => edit(record, 'drawing_change')}
             >
-              {option.label}
+                {option.label} <DownOutlined />
             </Button>
+            </Dropdown>
           </div>
         );
       },
@@ -1563,7 +1501,7 @@ const CustomerList = () => {
               size="small"
               icon={text ? <DeleteOutlined /> : <ClockCircleOutlined />} 
               disabled={!hasTimestamp}
-              onClick={() => record.id && handleUrgeOrder(record.id)}
+              onClick={() => record.id && handleUrgeOrderClick(record.id)}
             />
           </div>
         );
@@ -1612,7 +1550,7 @@ const CustomerList = () => {
       render: (text, record) => {
         // 如果组件数量过少，无法确定逆变器型号
         if (!record.module_count || record.module_count < 10) {
-          return <span style={{ color: '#999', fontStyle: 'italic' }}>无法确定型号</span>;
+          return <span style={{ color: '#999' }}>-</span>;
         }
 
         // 检查是否有出库日期（时间戳）
@@ -1624,7 +1562,7 @@ const CustomerList = () => {
             <Tag 
               color={record.inverter_outbound_date ? "green" : "blue"}
               style={{ cursor: 'pointer' }}
-              onClick={() => handleItemOutboundToggle(record.id, 'inverter', record.inverter_outbound_date)}
+              onClick={() => handleItemOutboundClick(record.id, 'inverter')}
             >
               {text || 'SN60PT'}
             </Tag>
@@ -1638,6 +1576,11 @@ const CustomerList = () => {
       key: 'copper_wire',
       ellipsis: true,
       render: (text, record) => {
+        // 如果组件数量为空或过少，显示"无法确定型号"
+        if (!record.module_count || record.module_count < 10) {
+          return <span style={{ color: '#999' }}>-</span>;
+        }
+        
         // 检查是否有出库日期（时间戳）
         const outboundDate = record.copper_wire_outbound_date ? 
           dayjs(record.copper_wire_outbound_date).format('YYYY-MM-DD') : '';
@@ -1647,7 +1590,7 @@ const CustomerList = () => {
             <Tag 
               color={record.copper_wire_outbound_date ? "green" : "blue"}
               style={{ cursor: 'pointer' }}
-              onClick={() => handleItemOutboundToggle(record.id, 'copper_wire', record.copper_wire_outbound_date)}
+              onClick={() => handleItemOutboundClick(record.id, 'copper_wire')}
             >
               {text || '3*35mm²'}
             </Tag>
@@ -1662,6 +1605,11 @@ const CustomerList = () => {
       key: 'aluminum_wire',
       ellipsis: true,
       render: (text, record) => {
+        // 如果组件数量为空或过少，显示"无法确定型号"
+        if (!record.module_count || record.module_count < 10) {
+          return <span style={{ color: '#999' }}>-</span>;
+        }
+        
         // 检查是否有出库日期（时间戳）
         const outboundDate = record.aluminum_wire_outbound_date ? 
           dayjs(record.aluminum_wire_outbound_date).format('YYYY-MM-DD') : '';
@@ -1671,7 +1619,7 @@ const CustomerList = () => {
             <Tag 
               color={record.aluminum_wire_outbound_date ? "green" : "blue"}
               style={{ cursor: 'pointer' }}
-              onClick={() => handleItemOutboundToggle(record.id, 'aluminum_wire', record.aluminum_wire_outbound_date)}
+              onClick={() => handleItemOutboundClick(record.id, 'aluminum_wire')}
             >
               {text || '3*50mm²'}
             </Tag>
@@ -1686,6 +1634,11 @@ const CustomerList = () => {
       key: 'distribution_box',
       ellipsis: true,
       render: (text, record) => {
+        // 如果组件数量为空或过少，显示"无法确定型号"
+        if (!record.module_count || record.module_count < 10) {
+          return <span style={{ color: '#999' }}>-</span>;
+        }
+        
         // 检查是否有出库日期（时间戳）
         const outboundDate = record.distribution_box_outbound_date ? 
           dayjs(record.distribution_box_outbound_date).format('YYYY-MM-DD') : '';
@@ -1695,7 +1648,7 @@ const CustomerList = () => {
             <Tag 
               color={record.distribution_box_outbound_date ? "green" : "blue"}
               style={{ cursor: 'pointer' }}
-              onClick={() => handleItemOutboundToggle(record.id, 'distribution_box', record.distribution_box_outbound_date)}
+              onClick={() => handleItemOutboundClick(record.id, 'distribution_box')}
             >
               {text || '80kWp'}
             </Tag>
@@ -1723,7 +1676,7 @@ const CustomerList = () => {
             <Tag 
               color="green" 
               style={{ cursor: 'pointer' }}
-              onClick={() => handleOutboundStatusChange(record.id, 'square_steel', 'inbound')}
+              onClick={() => handleItemOutboundClick(record.id, 'square_steel')}
             >
               {outboundDate}
             </Tag>
@@ -1738,7 +1691,7 @@ const CustomerList = () => {
             <Tag 
               color="orange" 
               style={{ cursor: 'pointer' }} 
-              onClick={() => handleOutboundStatusChange(record.id, 'square_steel', 'outbound')}
+              onClick={() => handleItemOutboundClick(record.id, 'square_steel')}
             >
               <RollbackOutlined /> {inboundDate}
             </Tag>
@@ -1756,7 +1709,7 @@ const CustomerList = () => {
             <Button 
               type="primary" 
               size="small"
-              onClick={() => handleOutboundStatusChange(record.id, 'square_steel', 'outbound')}
+              onClick={() => handleItemOutboundClick(record.id, 'square_steel')}
             >
               出库
             </Button>
@@ -1783,7 +1736,7 @@ const CustomerList = () => {
             <Tag 
               color="green" 
               style={{ cursor: 'pointer' }}
-              onClick={() => handleOutboundStatusChange(record.id, 'component', 'inbound')}
+              onClick={() => handleItemOutboundClick(record.id, 'component')}
             >
               {outboundDate}
             </Tag>
@@ -1798,7 +1751,7 @@ const CustomerList = () => {
             <Tag 
               color="orange" 
               style={{ cursor: 'pointer' }} 
-              onClick={() => handleOutboundStatusChange(record.id, 'component', 'outbound')}
+              onClick={() => handleItemOutboundClick(record.id, 'component')}
             >
               <RollbackOutlined /> {inboundDate}
             </Tag>
@@ -1816,7 +1769,7 @@ const CustomerList = () => {
             <Button 
               type="primary" 
               size="small"
-              onClick={() => handleOutboundStatusChange(record.id, 'component', 'outbound')}
+              onClick={() => handleItemOutboundClick(record.id, 'component')}
             >
               出库
             </Button>
@@ -1843,7 +1796,7 @@ const CustomerList = () => {
       key: 'construction_team',
       sorter: (a, b) => (a.construction_team || '').localeCompare(b.construction_team || ''),
       ellipsis: true,
-      render: (value, record) => <ConstructionTeamCell value={value} record={record} />
+      render: (value, record) => <ConstructionTeamPhoneCell value={value} record={record} />
     },
     {
       title: '施工队电话',
@@ -1912,7 +1865,23 @@ const CustomerList = () => {
       render: (text, record) => {
         // 如果已审核通过
         if (text) {
-          const reviewTime = dayjs(text).format('YYYY-MM-DD HH:mm');
+          // 检查是否为有效日期
+          let reviewTime = '未知时间';
+          try {
+            // 使用dayjs检查是否为有效日期，如果无效会抛出警告
+            if (dayjs(text).isValid()) {
+              reviewTime = dayjs(text).format('YYYY-MM-DD HH:mm');
+            } else if (text === true || text === 'true' || text === 'false' || text === false) {
+              // 处理布尔值情况
+              reviewTime = dayjs().format('YYYY-MM-DD HH:mm');
+              console.warn(`技术审核字段为布尔值: ${text}，使用当前时间替代`);
+            } else {
+              console.warn(`无效的技术审核日期: ${text}`);
+            }
+          } catch (error) {
+            console.error('技术审核日期格式化错误:', error);
+          }
+          
           const canReset = userRole === 'admin';
           
           return (
@@ -1922,18 +1891,24 @@ const CustomerList = () => {
                 style={{ cursor: canReset ? 'pointer' : 'default' }}
                 onClick={() => canReset && record.id && handleTechnicalReviewChange(record.id, 'reset')}
               >
-                <CheckCircleOutlined /> {reviewTime} 已通过
+                <CheckCircleOutlined /> {reviewTime}
               </Tag>
             </Tooltip>
           );
         } else if (record.technical_review_rejected) {
           // 如果被驳回，从technical_review_rejected字段提取时间信息
-          let rejectionTime = '无记录';
+          let rejectionTime = '未知时间';
           
           // 尝试从状态中提取时间
-          const match = record.technical_review_rejected.match(/技术驳回 \(([0-9- :]+)\)/);
+          const match = record.technical_review_rejected.match(/技术驳回 \(([0-9/\-.: ]+)\)/);
           if (match && match[1]) {
             rejectionTime = match[1];
+          } else {
+            // 如果没有匹配到时间格式，直接使用字段原始值
+            rejectionTime = String(record.technical_review_rejected).replace('技术驳回', '').trim();
+            if (rejectionTime.startsWith('(') && rejectionTime.endsWith(')')) {
+              rejectionTime = rejectionTime.substring(1, rejectionTime.length - 1).trim();
+            }
           }
           
           return (
@@ -1965,7 +1940,18 @@ const CustomerList = () => {
         if (!a.technical_review && !b.technical_review) return 0
         if (!a.technical_review) return -1
         if (!b.technical_review) return 1
-        return new Date(a.technical_review).getTime() - new Date(b.technical_review).getTime()
+        
+        try {
+          // 确保日期比较不会因格式无效而崩溃
+          const aTime = dayjs(a.technical_review).isValid() ? 
+            new Date(a.technical_review).getTime() : 0;
+          const bTime = dayjs(b.technical_review).isValid() ? 
+            new Date(b.technical_review).getTime() : 0;
+          return aTime - bTime;
+        } catch (e) {
+          console.error('排序日期错误:', e);
+          return 0;
+        }
       },
       ellipsis: true,
     },
@@ -1986,7 +1972,7 @@ const CustomerList = () => {
               <Tag 
                 color="green" 
                 style={{ cursor: canReset ? 'pointer' : 'default' }}
-                onClick={() => canReset && record.id && handleUploadToGridChange(record.id, text)}
+                onClick={() => canReset && record.id && handleUploadToGridChange(record.id)}
               >
                 <ClockCircleOutlined /> {dayjs(text).format('YYYY-MM-DD HH:mm')}
               </Tag>
@@ -1999,7 +1985,7 @@ const CustomerList = () => {
               type="primary" 
               size="small"
               ghost
-              onClick={() => record.id && handleUploadToGridChange(record.id, null)}
+              onClick={() => record.id && handleUploadToGridChange(record.id)}
             >
               上传
             </Button>
@@ -2038,18 +2024,44 @@ const CustomerList = () => {
               const initialDays = parseInt(parts[1], 10);
               const startDate = parts[2];
               
+              try {
+                // 检查日期有效性
+                if (dayjs(startDate).isValid()) {
               // 计算从开始日期至今已等待天数
               const elapsedDays = dayjs().diff(dayjs(startDate), 'day');
               // 计算当前累计等待天数
               const totalWaitDays = initialDays + elapsedDays;
               
               displayText = `已等待 ${totalWaitDays} 天`;
+                } else {
+                  console.warn(`建设验收等待起始日期无效: ${startDate}`);
+                  displayText = `已等待 ${initialDays} 天`;
+                }
+              } catch (error) {
+                console.error('计算等待天数错误:', error);
+                displayText = `已等待 ${initialDays} 天`;
+              }
             } else {
               displayText = '等待中';
             }
           } else {
             // 普通日期显示
+            try {
+              // 检查日期有效性
+              if (dayjs(text).isValid()) {
             displayText = dayjs(text).format('YYYY-MM-DD HH:mm');
+              } else if (text === true || text === 'true' || text === false || text === 'false') {
+                // 处理布尔值情况
+                displayText = dayjs().format('YYYY-MM-DD HH:mm');
+                console.warn(`建设验收日期字段为布尔值: ${text}，使用当前时间替代`);
+              } else {
+                console.warn(`无效的建设验收日期: ${text}`);
+                displayText = '已验收';
+              }
+            } catch (error) {
+              console.error('建设验收日期格式化错误:', error);
+              displayText = '已验收';
+            }
           }
           
           return (
@@ -2082,7 +2094,18 @@ const CustomerList = () => {
         if (!a.construction_acceptance && !b.construction_acceptance) return 0
         if (!a.construction_acceptance) return -1
         if (!b.construction_acceptance) return 1
-        return new Date(a.construction_acceptance).getTime() - new Date(b.construction_acceptance).getTime()
+        
+        try {
+          // 确保日期比较不会因格式无效而崩溃
+          const aTime = dayjs(a.construction_acceptance).isValid() ? 
+            new Date(a.construction_acceptance).getTime() : 0;
+          const bTime = dayjs(b.construction_acceptance).isValid() ? 
+            new Date(b.construction_acceptance).getTime() : 0;
+          return aTime - bTime;
+        } catch (e) {
+          console.error('排序日期错误:', e);
+          return 0;
+        }
       },
       ellipsis: true,
     },
@@ -2103,7 +2126,7 @@ const CustomerList = () => {
               <Tag 
                 color="green" 
                 style={{ cursor: canReset ? 'pointer' : 'default' }}
-                onClick={() => canReset && record.id && handleMeterInstallationDateChange(record.id, text)}
+                onClick={() => canReset && record.id && handleMeterInstallationChange(record.id)}
               >
                 <ClockCircleOutlined /> {dayjs(text).format('YYYY-MM-DD HH:mm')}
               </Tag>
@@ -2116,7 +2139,7 @@ const CustomerList = () => {
               type="primary" 
               size="small"
               ghost
-              onClick={() => record.id && handleMeterInstallationDateChange(record.id, null)}
+              onClick={() => record.id && handleMeterInstallationChange(record.id)}
             >
               挂表
             </Button>
@@ -2322,340 +2345,35 @@ const CustomerList = () => {
                 ghost
               />
             </Tooltip>
-            {(userRole === 'admin') && (
-              <Tooltip title="删除">
-                <Button 
-                  icon={<DeleteOutlined />} 
-                  onClick={() => record.id && record.customer_name && handleDelete(record.id, record.customer_name)} 
-                  size="small" 
-                  danger
-                />
-              </Tooltip>
-            )}
-          </Space>
-        );
-      },
-    },
-  ]
-
-  // 添加一个生成模板下载功能
-  const handleDownloadTemplate = () => {
-    try {
-      // 创建模板表头
-      const templateHeaders = {
-        '登记日期': dayjs().format('YYYY-MM-DD'),
-        '客户姓名': '',
-        '客户电话': '',
-        '地址': '',
-        '身份证号': '',
-        '业务员': '',
-        '业务员电话': '',
-        '备案日期': '',
-        '电表号码': '',
-        '设计师': '',
-        '组件数量': '',
-        '备注': ''
-      };
-      
-      // 创建工作簿和工作表
-      const wb = XLSX.utils.book_new();
-      const ws = XLSX.utils.json_to_sheet([templateHeaders]);
-      
-      // 将工作表添加到工作簿
-      XLSX.utils.book_append_sheet(wb, ws, '客户导入模板');
-      
-      // 保存文件
-      XLSX.writeFile(wb, `客户导入模板.xlsx`);
-      message.success('模板下载成功');
-    } catch (error) {
-      message.error('模板下载失败');
-      console.error(error);
-    }
-  };
-
-  // 更新出库状态变更处理函数
-  const handleOutboundStatusChange = async (id: string | undefined, type: 'square_steel' | 'component', status: OutboundStatus) => {
-    if (!id) {
-      console.error('无效的客户ID');
-      message.error('操作失败: 无效的客户ID');
-      return;
-    }
-    
-    try {
-      console.log(`更新出库状态: ID=${id}, 类型=${type}, 状态=${status}`);
-      
-      // 立即更新本地UI状态显示
-      const updatedCustomers = filteredCustomers.map(customer => {
-        if (customer.id === id) {
-          const updatedCustomer = { ...customer };
-          
-          if (type === 'square_steel') {
-            // 更新方钢状态
-            updatedCustomer.square_steel_status = status;
-            if (status === 'outbound') {
-              updatedCustomer.square_steel_outbound_date = new Date().toISOString();
-            } else if (status === 'inbound') {
-              updatedCustomer.square_steel_inbound_date = new Date().toISOString();
-            }
-          } else if (type === 'component') {
-            // 更新组件状态
-            updatedCustomer.component_status = status;
-            if (status === 'outbound') {
-              updatedCustomer.component_outbound_date = new Date().toISOString();
-            } else if (status === 'inbound') {
-              updatedCustomer.component_inbound_date = new Date().toISOString();
-            }
-          }
-          
-          return updatedCustomer;
-        }
-        return customer;
-      });
-      
-      // 更新本地状态
-      setFilteredCustomers(updatedCustomers);
-      setCustomers(customers.map(customer => 
-        customer.id === id ? updatedCustomers.find(c => c.id === id) || customer : customer
-      ));
-      
-      // 调用API更新后端
-      await customerApi.updateOutboundStatus(id, type, true);
-      
-      if (status === 'outbound') {
-        message.success('已标记为出库');
-      } else if (status === 'inbound') {
-        message.success('已标记为回库');
-      } else if (status === 'none') {
-        message.success('状态已重置');
-      } else if (status === 'returned') {
-          message.success('已标记为退单');
-      }
-      
-      // 在后台刷新数据确保同步，但不会影响用户体验
-      setTimeout(() => {
-      fetchCustomers();
-      }, 1000);
-    } catch (error) {
-      console.error('更新状态失败:', error);
-      message.error(`更新状态失败: ${error instanceof Error ? error.message : '未知错误'}`);
-      // 出错时恢复数据
-      fetchCustomers();
-    }
-  };
-
-  // 显示退单或出库选择对话框
-  const showOutboundOptions = (id: string | undefined, type: 'square_steel' | 'component') => {
-    if (!id) {
-      console.error('无效的客户ID');
-      message.error('操作失败: 无效的客户ID');
-      return;
-    }
-    
-    Modal.confirm({
-      title: '选择操作',
-      content: '请选择要执行的操作:',
-      okText: '出库',
-      okType: 'primary',
-      cancelText: '退单',
-      onOk() {
-        handleOutboundStatusChange(id, type, 'outbound');
-      },
-      onCancel() {
-        handleOutboundStatusChange(id, type, 'returned');
-      },
-      okButtonProps: {
-        style: { backgroundColor: '#52c41a' }
-      },
-      cancelButtonProps: {
-        style: { backgroundColor: '#ff4d4f', color: 'white' }
-      }
-    });
-  };
-
-  // 处理催单
-  const handleUrgeOrder = async (id: string | undefined) => {
-    if (!id) return
-    
-    try {
-      setLoading(true)
-      const targetCustomer = customers.find(c => c.id === id)
-      
-      if (!targetCustomer) {
-        message.error('找不到指定客户')
-        return
-      }
-      
-      // 如果当前有催单记录，则取消催单
-      if (targetCustomer.urge_order) {
-        await customerApi.update(id, { urge_order: null })
-        message.success('取消催单成功')
-      } else {
-        // 否则添加催单
-        await customerApi.update(id, { urge_order: new Date().toISOString() })
-        message.success('添加催单成功')
-      }
-      
-      fetchCustomers()
-    } catch (error) {
-      console.error('催单操作失败:', error)
-      message.error('催单操作失败')
-    } finally {
-      setLoading(false)
-    }
-  }
-  
-  // 处理物品出库状态切换
-  const handleItemOutboundToggle = async (id: string | undefined, itemType: string, currentDate: string | null | undefined) => {
-    if (!id) {
-      message.error('无效的客户ID');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      
-      // 如果已有日期，则清除日期（取消出库状态）
-      // 如果没有日期，则设置为当前日期（标记为已出库）
-      const updateObj: Record<string, any> = {
-        [`${itemType}_outbound_date`]: currentDate ? null : dayjs().format('YYYY-MM-DD')
-      };
-      
-      await customerApi.update(id, updateObj);
-      
-      // 刷新客户列表
-      await fetchCustomers();
-      
-      message.success(currentDate ? `${itemType}已取消出库` : `${itemType}已标记为出库`);
-    } catch (error) {
-      console.error('更新出库状态失败:', error);
-      message.error('更新出库状态失败');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // 添加一个专门用于施工队的可编辑单元格
-  const ConstructionTeamCell = ({ value, record }: { value: any; record: Customer }) => {
-    const editable = isEditing(record, 'construction_team');
-    const [hover, setHover] = useState(false);
-    
-    // 将施工队数据转换为Select选项格式
-    const teamOptions = constructionTeams.map(team => ({
-      value: team.name,
-      label: team.name,
-      phone: team.phone || ''
-    }));
-    
-    // 添加一个清空选项
-    teamOptions.unshift({
-      value: '',
-      label: '清空施工队',
-      phone: ''
-    });
-    
-    return editable ? (
-      <Form.Item
-        name="construction_team"
-        style={{ margin: 0 }}
-      >
-        <Select
-          placeholder="请选择或输入施工队"
-          autoFocus
-          allowClear
-          showSearch
-          optionFilterProp="label"
-          options={teamOptions}
-          onBlur={() => record.id ? save(record.id) : undefined}
-          onChange={(value, option) => {
-            // 如果选择了已有施工队，自动填充电话
-            if (value && typeof option === 'object' && 'phone' in option) {
-              // 设置电话号码字段
-              editForm.setFieldsValue({ construction_team_phone: option.phone });
-              
-              // 如果有ID，立即保存施工队名称
-              if (record.id) {
-                // 先保存施工队名称
-                save(record.id).then(() => {
-                  // 然后自动编辑电话字段
-                  setTimeout(() => {
-                    // 只有当电话字段还没被编辑时才自动保存电话
-                    if (editingCell?.dataIndex === 'construction_team' && record.construction_team_phone !== option.phone) {
-                      // 更新电话号码
-                      customerApi.update(record.id as string, { construction_team_phone: option.phone || '' })
-                        .then(() => {
-                          // 成功后刷新数据
-                          fetchCustomers();
-                          message.success('已自动更新施工队电话');
-                        })
-                        .catch(error => {
-                          console.error('自动更新施工队电话失败:', error);
-                        });
-                    }
-                  }, 500);
-                });
-              }
-            } else if (value === '') {
-              // 如果清空施工队，同时清空电话和派工日期
-              editForm.setFieldsValue({ construction_team_phone: '' });
-              
-              // 如果有ID，在保存后清除派工日期
-              if (record.id) {
-                // 先保存施工队为空
-                save(record.id).then(() => {
-                  // 然后清除派工日期
-                  customerApi.update(record.id as string, { 
-                    construction_team_phone: '',
-                    dispatch_date: null 
-                  })
-                    .then(() => {
-                      // 成功后刷新数据
-                      fetchCustomers();
-                      message.success('已清除施工队信息和派工日期');
-                    })
-                    .catch(error => {
-                      console.error('清除派工日期失败:', error);
-                      message.error('清除派工日期失败');
-                    });
-                });
-              }
-            }
-          }}
-        />
-      </Form.Item>
-    ) : (
-      <div 
-        style={{ 
-          display: 'flex', 
-          alignItems: 'center',
-          padding: '4px 0',
-          borderRadius: 4,
-          cursor: editingCell === null ? 'pointer' : 'default',
-          background: hover ? '#f0f5ff' : 'transparent'
-        }}
-        onMouseEnter={() => setHover(true)}
-        onMouseLeave={() => setHover(false)}
-        onClick={() => editingCell === null && edit(record, 'construction_team')}
-      >
-        <div style={{ flex: 1 }}>
-          {value ? (
-            <span>{value}</span>
-          ) : (
-            <span style={{ color: '#999' }}>-</span>
-          )}
-        </div>
-        {hover && editingCell === null && (
+            <Dropdown
+              menu={{
+                items: [
+                  {
+                    key: 'delete',
+                    danger: true,
+                    label: (
+                      <Typography.Text onClick={() => handleDelete(record.id, record.customer_name)}>
+                        删除
+                      </Typography.Text>
+                    ),
+                  },
+                  // ... 其他菜单项
+                ],
+              }}
+            >
           <Button 
             type="text" 
             size="small"
-            icon={<EditOutlined />}
-            onClick={() => edit(record, 'construction_team')}
+                icon={<DeleteOutlined />} 
             style={{ padding: '0 4px' }}
-            title="编辑施工队"
+                title="更多操作"
           />
-        )}
-      </div>
+            </Dropdown>
+          </Space>
     );
-  };
+      },
+    },
+  ];
   
   // 施工队电话可编辑单元格
   const ConstructionTeamPhoneCell = ({ value, record }: { value: any; record: Customer }) => {
@@ -2669,8 +2387,8 @@ const CustomerList = () => {
       >
         <Input 
           placeholder="施工队电话" 
-          onPressEnter={() => record.id ? save(record.id) : undefined} 
-          onBlur={() => record.id ? save(record.id) : undefined}
+          onPressEnter={() => record.id ? saveEditedCell(record.id) : undefined} 
+          onBlur={() => record.id ? saveEditedCell(record.id) : undefined}
           allowClear
         />
       </Form.Item>
@@ -2712,81 +2430,110 @@ const CustomerList = () => {
   // 处理施工状态变更
   const handleConstructionStatusChange = async (id: string | undefined, currentStatus: string | null) => {
     if (!id) {
-      console.error('无效的客户ID');
-      message.error('操作失败: 无效的客户ID');
+      message.error('客户ID无效');
       return;
     }
     
-    try {
-      setLoading(true);
+    // 如果当前状态已设置，标记为未完成，否则标记为完成并记录日期
+    const newStatus = currentStatus ? null : new Date().toISOString();
       
-      // 如果当前有状态（已完工），则恢复为未完工
-      // 如果当前没有状态（未完工），则标记为已完工
-      const updateObj = {
-        construction_status: currentStatus ? null : new Date().toISOString()
+    try {
+      // 明确指定类型为Partial<Customer>
+      const updateData: Partial<Customer> = {
+        construction_status: newStatus
+        // 移除construction_date字段，因为数据库中不存在此字段
       };
       
-      await customerApi.update(id, updateObj);
+      // 使用数据缓存服务更新数据
+      customerApi.updateWithCache(id, updateData);
       
-      message.success(currentStatus ? '已恢复为未完工状态' : '已标记为完工状态');
-      fetchCustomers(); // 刷新数据
+      // 更新本地状态 - 直接使用updateData而非更新后的返回值
+      setCustomers(prev => 
+        prev.map(customer => {
+          if (customer.id === id) {
+            return { ...customer, ...updateData };
+          }
+          return customer;
+        })
+      );
+      
+      setFilteredCustomers(prev => 
+        prev.map(customer => {
+          if (customer.id === id) {
+            return { ...customer, ...updateData };
+          }
+          return customer;
+        })
+      );
+      
+      message.success(newStatus ? '已标记为施工完成' : '已标记为未施工');
     } catch (error) {
       console.error('更新施工状态失败:', error);
       message.error('操作失败，请重试');
-    } finally {
-      setLoading(false);
     }
   };
 
   // 处理技术审核状态变更
   const handleTechnicalReviewChange = async (id: string | undefined, status: 'approved' | 'rejected' | 'reset') => {
     if (!id) {
-      console.error('无效的客户ID');
-      message.error('操作失败: 无效的客户ID');
+      message.error('客户ID无效');
       return;
     }
     
     try {
-      setLoading(true);
-
-      // 查找当前客户记录
-      const customer = filteredCustomers.find(c => c.id === id);
-      if (!customer) {
-        throw new Error('找不到客户记录');
-      }
-
-      const now = new Date().toISOString();
-      const updateObj: Record<string, any> = {
-        technical_review: status === 'approved' ? now : null
-      };
+      let updateObj: Record<string, any> = {};
       
-      // 不再更新status字段，只在驳回时记录在状态文本中
-      if (status === 'rejected') {
-        // 如果审核被驳回，设置状态为技术驳回
-        updateObj.technical_review_rejected = `技术驳回 (${dayjs(now).format('YYYY-MM-DD HH:mm')})`;
-      } else {
-        // 如果审核通过或重置，清除驳回记录
-        updateObj.technical_review_rejected = null;
-      }
-      
-      await customerApi.update(id, updateObj);
-      
-      let successMessage = '';
       if (status === 'approved') {
-        successMessage = '审核已通过';
+        // 使用dayjs处理日期，确保格式一致
+        const now = dayjs();
+        const formattedDate = now.format('YYYY-MM-DD HH:mm:ss');
+        
+        updateObj = {
+          technical_review: now.toISOString(), // 使用ISO标准格式存储
+          technical_review_date: now.toISOString(),
+          technical_review_notes: '已通过技术审核',
+          technical_review_rejected: null // 清除驳回状态
+        };
       } else if (status === 'rejected') {
-        successMessage = '已驳回审核';
-      } else if (status === 'reset') {
-        successMessage = '已重置为待审核状态';
+        const now = dayjs();
+        const formattedDate = now.format('YYYY-MM-DD HH:mm:ss');
+        
+        updateObj = {
+          technical_review: null, // 设置为null而非false
+          technical_review_date: now.toISOString(),
+          technical_review_notes: '技术审核不通过',
+          technical_review_rejected: `技术驳回 (${formattedDate})` // 使用格式化的日期时间
+        };
+      } else {
+        // 重置状态
+        updateObj = {
+          technical_review: null,
+          technical_review_date: null,
+          technical_review_notes: null,
+          technical_review_rejected: null
+        };
       }
       
-      message.success(successMessage);
-      fetchCustomers(); // 刷新数据
+      // 使用数据缓存服务更新数据
+      customerApi.updateWithCache(id, updateObj);
+      
+      // 更新本地状态 - 使用传入的updateObj而非updatedCustomer，确保UI立即更新
+      setCustomers(prev => 
+        prev.map(customer => (customer.id === id ? { ...customer, ...updateObj } : customer))
+      );
+      setFilteredCustomers(prev => 
+        prev.map(customer => (customer.id === id ? { ...customer, ...updateObj } : customer))
+      );
+      
+      const statusText = 
+        status === 'approved' ? '已通过技术审核' : 
+        status === 'rejected' ? '已标记为技术审核不通过' : 
+        '已重置技术审核状态';
+      
+      message.success(statusText);
     } catch (error) {
       console.error('更新技术审核状态失败:', error);
       message.error('操作失败，请重试');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -2820,78 +2567,131 @@ const CustomerList = () => {
   };
 
   // 处理上传国网状态变更
-  const handleUploadToGridChange = async (id: string | undefined, currentStatus: string | null) => {
+  const handleUploadToGridChange = async (id: string | undefined) => {
     if (!id) {
-      console.error('无效的客户ID');
-      message.error('操作失败: 无效的客户ID');
+      message.error('客户ID无效');
       return;
     }
     
     try {
-      setLoading(true);
+      const customer = customers.find(c => c.id === id);
+      if (!customer) {
+        message.error('未找到客户信息');
+        return;
+      }
       
-      // 如果当前有状态（已上传），则恢复为未上传
-      // 如果当前没有状态（未上传），则标记为已上传
-      const updateObj = {
-        upload_to_grid: currentStatus ? null : new Date().toISOString()
+      // 切换上传国网状态，当前有值则清空，无值则设置为当前日期
+      const updateObj: Record<string, any> = {
+        upload_to_grid: customer.upload_to_grid ? null : new Date().toISOString()
       };
       
-      await customerApi.update(id, updateObj);
+      // 使用数据缓存服务更新数据
+      const updatedCustomer = customerApi.updateWithCache(id, updateObj);
       
-      message.success(currentStatus ? '已恢复为未上传状态' : '已标记为已上传状态');
-      fetchCustomers(); // 刷新数据
+      // 更新本地状态
+      setCustomers(prev => 
+        prev.map(c => (c.id === id ? { ...c, ...updatedCustomer } : c))
+      );
+      setFilteredCustomers(prev => 
+        prev.map(c => (c.id === id ? { ...c, ...updatedCustomer } : c))
+      );
+      
+      message.success(customer.upload_to_grid ? '已重置上传国网状态' : '已标记为已上传国网');
     } catch (error) {
       console.error('更新上传国网状态失败:', error);
       message.error('操作失败，请重试');
-    } finally {
-      setLoading(false);
+    }
+  };
+
+  // 处理电表安装日期变更
+  const handleMeterInstallationChange = async (id: string | undefined) => {
+    if (!id) {
+      message.error('客户ID无效');
+      return;
+    }
+    
+    try {
+      const customer = customers.find(c => c.id === id);
+      if (!customer) {
+        message.error('未找到客户信息');
+        return;
+      }
+      
+      // 切换电表安装状态，当前有值则清空，无值则设置为当前日期
+      const updateObj: Record<string, any> = {
+        meter_installation_date: customer.meter_installation_date ? null : new Date().toISOString()
+      };
+      
+      // 使用数据缓存服务更新数据
+      const updatedCustomer = customerApi.updateWithCache(id, updateObj);
+      
+      // 更新本地状态
+      setCustomers(prev => 
+        prev.map(c => (c.id === id ? { ...c, ...updatedCustomer } : c))
+      );
+      setFilteredCustomers(prev => 
+        prev.map(c => (c.id === id ? { ...c, ...updatedCustomer } : c))
+      );
+      
+      message.success(customer.meter_installation_date ? '已重置电表安装状态' : '已标记为电表已安装');
+    } catch (error) {
+      console.error('更新电表安装状态失败:', error);
+      message.error('操作失败，请重试');
     }
   };
 
   // 处理建设验收状态变更
   const handleConstructionAcceptanceChange = async (id: string | undefined, currentStatus: string | null, days?: number) => {
     if (!id) {
-      console.error('无效的客户ID');
-      message.error('操作失败: 无效的客户ID');
+      message.error('客户ID无效');
       return;
     }
     
     try {
-      setLoading(true);
-      
+      const now = dayjs();
       let updateObj: Record<string, any> = {};
       
-      if (!currentStatus) {
-        if (days !== undefined) {
-          // 设置等待状态
-          // 将等待天数和开始日期保存在状态值中，格式为: "waiting:天数:开始日期"
-          const startDate = dayjs().format('YYYY-MM-DD');
-          updateObj.construction_acceptance = `waiting:${days}:${startDate}`;
-        } else {
-          // 直接设置为已推到状态
-          updateObj.construction_acceptance = new Date().toISOString();
-        }
-      } else {
-        // 恢复为未推到状态
-        updateObj.construction_acceptance = null;
-      }
-      
-      await customerApi.update(id, updateObj);
-      
       if (currentStatus) {
-        message.success('已恢复为未推到状态');
-      } else if (days !== undefined) {
-        message.success(`已设置为等待天数: ${days}`);
+        // 如果已经验收，则重置验收状态
+        updateObj = {
+          construction_acceptance: null,
+          construction_acceptance_date: null,
+          construction_acceptance_notes: null
+        };
+      } else if (days) {
+        // 如果选择了等待天数选项，使用特殊格式"waiting:天数:开始日期"
+        updateObj = {
+          construction_acceptance: `waiting:${days}:${now.format('YYYY-MM-DD')}`,
+          construction_acceptance_date: now.toISOString(),
+          construction_acceptance_notes: `等待中 - 设置于 ${now.format('YYYY-MM-DD HH:mm:ss')}`
+        };
       } else {
-        message.success('已标记为已推到状态');
+        // 如果未验收且没有设置等待天数，则标记为验收完成
+        updateObj = {
+          construction_acceptance: now.toISOString(),
+          construction_acceptance_date: now.toISOString(),
+          construction_acceptance_notes: '今日验收完成'
+        };
       }
       
-      fetchCustomers(); // 刷新数据
+      // 使用数据缓存服务更新数据
+      customerApi.updateWithCache(id, updateObj);
+      
+      // 更新本地状态 - 使用updateObj而非updatedCustomer，确保UI立即更新
+      setCustomers(prev => 
+        prev.map(customer => (customer.id === id ? { ...customer, ...updateObj } : customer))
+      );
+      setFilteredCustomers(prev => 
+        prev.map(customer => (customer.id === id ? { ...customer, ...updateObj } : customer))
+      );
+      
+      const successMsg = currentStatus ? '已重置验收状态' : 
+                         days ? `已设置为等待 ${days} 天` : 
+                         '已标记为验收完成';
+      message.success(successMsg);
     } catch (error) {
-      console.error('更新建设验收状态失败:', error);
+      console.error('更新验收状态失败:', error);
       message.error('操作失败，请重试');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -2925,7 +2725,7 @@ const CustomerList = () => {
           >
             <Space direction="vertical">
               <Radio value="now">立即标记为已推到</Radio>
-              <Radio value="wait">等待天数</Radio>
+              <Radio value="wait">设置等待天数</Radio>
             </Space>
           </Radio.Group>
           <div id="waitDaysInputContainer" style={{ marginLeft: 24, marginTop: 10, display: 'none' }}>
@@ -2940,48 +2740,24 @@ const CustomerList = () => {
           </div>
         </div>
       ),
+      okText: '确认',
+      cancelText: '取消',
       async onOk() {
         try {
           if (radioValue === 'wait') {
+            // 设置等待天数
             await handleConstructionAcceptanceChange(id, null, waitDays);
           } else {
+            // 立即标记为已推到
             await handleConstructionAcceptanceChange(id, null);
           }
           return Promise.resolve();
         } catch (error) {
-          return Promise.reject();
+          console.error('设置建设验收状态失败:', error);
+          return Promise.reject(error);
         }
       }
     });
-  };
-
-  // 处理挂表日期状态变更
-  const handleMeterInstallationDateChange = async (id: string | undefined, currentStatus: string | null) => {
-    if (!id) {
-      console.error('无效的客户ID');
-      message.error('操作失败: 无效的客户ID');
-      return;
-    }
-    
-    try {
-      setLoading(true);
-      
-      // 如果当前有状态（已挂表），则恢复为未挂表
-      // 如果当前没有状态（未挂表），则标记为已挂表
-      const updateObj = {
-        meter_installation_date: currentStatus ? null : new Date().toISOString()
-      };
-      
-      await customerApi.update(id, updateObj);
-      
-      message.success(currentStatus ? '已恢复为未挂表状态' : '已标记为已挂表状态');
-      fetchCustomers(); // 刷新数据
-    } catch (error) {
-      console.error('更新挂表日期状态失败:', error);
-      message.error('操作失败，请重试');
-    } finally {
-      setLoading(false);
-    }
   };
 
   // 处理购售电合同状态变更
@@ -3022,21 +2798,25 @@ const CustomerList = () => {
     }
     
     try {
-      setLoading(true);
-      
       const updateObj = {
         status: newStatus
       };
       
-      await customerApi.update(id, updateObj);
+      // 使用数据缓存服务更新数据
+      const updatedCustomer = customerApi.updateWithCache(id, updateObj);
+      
+      // 更新本地状态
+      setCustomers(prev => 
+        prev.map(customer => (customer.id === id ? { ...customer, ...updatedCustomer } : customer))
+      );
+      setFilteredCustomers(prev => 
+        prev.map(customer => (customer.id === id ? { ...customer, ...updatedCustomer } : customer))
+      );
       
       message.success(`状态已更新为: ${newStatus}`);
-      fetchCustomers(); // 刷新数据
     } catch (error) {
       console.error('更新状态失败:', error);
       message.error('操作失败，请重试');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -3090,14 +2870,49 @@ const CustomerList = () => {
   // 渲染标题栏操作按钮
   const renderTitleBar = () => (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-      <Title level={4} style={{ margin: 0 }}>客户列表</Title>
+      <Space>
+        <Button 
+          size="small"
+          type={pageSize === 100 ? "primary" : "default"}
+          onClick={() => handlePageSizeChange(100)}
+        >
+          100条/页
+        </Button>
+        <Button 
+          size="small"
+          type={pageSize === 500 ? "primary" : "default"}
+          onClick={() => handlePageSizeChange(500)}
+        >
+          500条/页
+        </Button>
+        <Button 
+          size="small"
+          type={pageSize === 1000 ? "primary" : "default"}
+          onClick={() => handlePageSizeChange(1000)}
+        >
+          1000条/页
+        </Button>
+        <Select
+          size="small"
+          style={{ width: 100 }}
+          value={currentPage}
+          onChange={handlePageChange}
+          placeholder="选择页码"
+        >
+          {Array.from({ length: totalPages }, (_, i) => (
+            <Select.Option key={i + 1} value={i + 1}>
+              {i + 1} / {totalPages}
+            </Select.Option>
+          ))}
+        </Select>
+      </Space>
       <Space>
         <Input
           placeholder="搜索客户名称/电话/地址 (多关键词用空格或逗号分隔)"
           value={searchText}
-          onChange={(e) => setSearchText(e.target.value)}
-          onPressEnter={() => handleSearch(searchText)}
-          style={{ width: 320 }}
+          onChange={handleInputChange}
+          onPressEnter={(e) => handleSearch(searchText)}
+          style={{ width: 250 }}
           prefix={<SearchOutlined />}
           allowClear
         />
@@ -3163,7 +2978,7 @@ const CustomerList = () => {
           showSearch
           optionFilterProp="label"
           options={surveyorOptions}
-          onBlur={() => record.id ? save(record.id) : undefined}
+          onBlur={() => record.id ? saveEditedCell(record.id) : undefined}
           onChange={(value, option) => {
             // 如果选择了踏勘员，自动填充电话
             if (value && typeof option === 'object' && 'phone' in option) {
@@ -3219,8 +3034,8 @@ const CustomerList = () => {
       >
         <Input 
           placeholder="请输入踏勘员电话"
-          onPressEnter={() => record.id ? save(record.id) : undefined}
-          onBlur={() => record.id ? save(record.id) : undefined}
+          onPressEnter={() => record.id ? saveEditedCell(record.id) : undefined}
+          onBlur={() => record.id ? saveEditedCell(record.id) : undefined}
         />
       </Form.Item>
     ) : (
@@ -3294,6 +3109,365 @@ const CustomerList = () => {
     }
   };
 
+  // 添加页码改变的处理函数
+  const handlePageChange = (page: number) => {
+    if (page > 0 && page <= totalPages) {
+      setCurrentPage(page);
+    }
+  }
+  
+  // 添加页面大小改变的处理函数
+  const handlePageSizeChange = (size: number) => {
+    setPageSize(size);
+    setCurrentPage(1); // 重置到第一页
+    setTotalPages(Math.ceil(filteredCustomers.length / size));
+  }
+  
+  // 计算当前页显示的数据
+  const paginatedCustomers = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = startIndex + pageSize;
+    return filteredCustomers.slice(startIndex, endIndex);
+  }, [filteredCustomers, currentPage, pageSize]);
+
+  // 修改handleSearch函数，用于按钮点击和Enter键触发搜索
+  const handleSearch = (value: string) => {
+    setCurrentPage(1); // 搜索时重置到第一页
+    performSearch(value);
+    
+    // 在这里显示未找到匹配的提示，因为这是用户主动触发的搜索
+    if (value.trim().length > 0) {
+      // 支持空格或逗号分隔的多关键词搜索
+      const keywords = value.toLowerCase()
+        .split(/[\s,，]+/) // 按空格或中英文逗号分隔
+        .filter(keyword => keyword.trim() !== ''); // 过滤掉空字符串
+      
+      const filtered = customers.filter(customer => {
+        const name = (customer.customer_name || '').toLowerCase();
+        const phone = (customer.phone || '').toLowerCase();
+        const address = (customer.address || '').toLowerCase();
+        const salesman = (customer.salesman || '').toLowerCase();
+        const idCard = (customer.id_card || '').toLowerCase();
+        const meterNumber = (customer.meter_number || '').toLowerCase();
+        
+        // 对每个关键词进行检查，只要有一个关键词匹配任何字段就返回true
+        return keywords.some(keyword => 
+          name.includes(keyword) || 
+          phone.includes(keyword) || 
+          address.includes(keyword) || 
+          salesman.includes(keyword) ||
+          idCard.includes(keyword) ||
+          meterNumber.includes(keyword)
+        );
+      });
+      
+      if (filtered.length === 0 && customers.length > 0) {
+        message.info(`未找到匹配"${value}"的客户记录`);
+      }
+    }
+  };
+
+  // 处理首次联系状态变更
+  const handleFirstContactChange = async (id: string | undefined) => {
+    if (!id) {
+      message.error('客户ID无效');
+      return;
+    }
+    
+    try {
+      const customer = customers.find(c => c.id === id);
+      if (!customer) {
+        message.error('未找到客户信息');
+        return;
+      }
+      
+      // 使用类型断言解决类型问题
+      const hasFirstContact = (customer as any).first_contact;
+      const updateObj: Record<string, any> = {
+        first_contact: hasFirstContact ? null : new Date().toISOString()
+      };
+      
+      // 使用数据缓存服务更新数据
+      const updatedCustomer = customerApi.updateWithCache(id, updateObj);
+      
+      // 更新本地状态
+      setCustomers(prev => 
+        prev.map(c => (c.id === id ? { ...c, ...updatedCustomer } : c))
+      );
+      setFilteredCustomers(prev => 
+        prev.map(c => (c.id === id ? { ...c, ...updatedCustomer } : c))
+      );
+      
+      message.success(hasFirstContact ? '已重置首次联系状态' : '已标记为已联系');
+    } catch (error) {
+      console.error('更新首次联系状态失败:', error);
+      message.error('操作失败，请重试');
+    }
+  };
+
+  // 处理续约状态变更
+  const handleRenewalStatusChange = async (id: string | undefined) => {
+    if (!id) {
+      message.error('客户ID无效');
+      return;
+    }
+    
+    try {
+      const customer = customers.find(c => c.id === id);
+      if (!customer) {
+        message.error('未找到客户信息');
+        return;
+      }
+      
+      // 使用类型断言解决类型问题
+      const hasRenewalStatus = (customer as any).renewal_status;
+      const updateObj: Record<string, any> = {
+        renewal_status: hasRenewalStatus ? null : new Date().toISOString()
+      };
+      
+      // 使用数据缓存服务更新数据
+      const updatedCustomer = customerApi.updateWithCache(id, updateObj);
+      
+      // 更新本地状态
+      setCustomers(prev => 
+        prev.map(c => (c.id === id ? { ...c, ...updatedCustomer } : c))
+      );
+      setFilteredCustomers(prev => 
+        prev.map(c => (c.id === id ? { ...c, ...updatedCustomer } : c))
+      );
+      
+      message.success(hasRenewalStatus ? '已重置续约状态' : '已标记为已续约');
+    } catch (error) {
+      console.error('更新续约状态失败:', error);
+      message.error('操作失败，请重试');
+    }
+  };
+
+  // 处理有意向状态变更
+  const handleInterestStatusChange = async (id: string | undefined) => {
+    if (!id) {
+      message.error('客户ID无效');
+      return;
+    }
+    
+    try {
+      const customer = customers.find(c => c.id === id);
+      if (!customer) {
+        message.error('未找到客户信息');
+        return;
+      }
+      
+      // 切换有意向状态
+      const updateObj = {
+        status: customer.status === 'interested' ? null : 'interested'
+      };
+      
+      // 使用数据缓存服务更新数据
+      const updatedCustomer = customerApi.updateWithCache(id, updateObj);
+      
+      // 更新本地状态
+      setCustomers(prev => 
+        prev.map(c => (c.id === id ? { ...c, ...updatedCustomer } : c))
+      );
+      setFilteredCustomers(prev => 
+        prev.map(c => (c.id === id ? { ...c, ...updatedCustomer } : c))
+      );
+      
+      message.success(customer.status === 'interested' ? '已重置意向状态' : '已标记为有意向');
+    } catch (error) {
+      console.error('更新意向状态失败:', error);
+      message.error('操作失败，请重试');
+    }
+  };
+
+  // 处理催单按钮点击事件
+  const handleUrgeOrderClick = async (recordId: string) => {
+    try {
+      if (!recordId) {
+        message.error('记录ID无效');
+        return;
+      }
+      
+      // 使用带缓存的方法更新催单状态，UI立即响应
+      const updatedCustomer = customerApi.updateUrgeOrderWithCache(recordId);
+      
+      // 更新本地状态
+      setCustomers(prev => 
+        prev.map(customer => (customer.id === recordId ? { ...customer, urge_order: updatedCustomer.urge_order } : customer))
+      );
+      setFilteredCustomers(prev => 
+        prev.map(customer => (customer.id === recordId ? { ...customer, urge_order: updatedCustomer.urge_order } : customer))
+      );
+      
+      // 显示操作结果
+      message.success(updatedCustomer.urge_order ? '已添加催单标记' : '已移除催单标记');
+    } catch (error) {
+      console.error('催单操作失败:', error);
+      message.error('催单操作失败');
+      // 如果出错，刷新列表获取最新数据
+      fetchCustomers();
+    }
+  };
+
+  // 处理图纸变更按钮点击事件
+  const handleDrawingChangeClick = async (recordId: string, newValue: string) => {
+    try {
+      if (!recordId) {
+        message.error('记录ID无效');
+        return;
+      }
+      
+      // 使用Record<string, any>类型绕过类型检查
+      const updateData: Record<string, any> = {
+        drawing_change: newValue || '无变更'
+      };
+      
+      // 使用updateWithCache方法异步更新，绕过类型检查
+      await customerApi.updateWithCache(recordId, updateData);
+      
+      // 本地更新状态，使用类型断言
+      setCustomers(prev => 
+        prev.map(customer => {
+          if (customer.id === recordId) {
+            const updatedCustomer = { ...customer } as any;
+            updatedCustomer.drawing_change = newValue || '无变更';
+            return updatedCustomer;
+          }
+          return customer;
+        })
+      );
+      
+      setFilteredCustomers(prev => 
+        prev.map(customer => {
+          if (customer.id === recordId) {
+            const updatedCustomer = { ...customer } as any;
+            updatedCustomer.drawing_change = newValue || '无变更';
+            return updatedCustomer;
+          }
+          return customer;
+        })
+      );
+      
+      // 显示操作结果
+      message.success(`图纸变更状态已更新为"${newValue || '无变更'}"`);
+    } catch (error) {
+      console.error('更新图纸变更状态失败:', error);
+      message.error('更新图纸变更状态失败');
+      // 如果出错，刷新列表获取最新数据
+      fetchCustomers();
+    }
+  };
+
+  // 处理物品出库状态变更
+  const handleItemOutboundClick = async (recordId: string, itemType: string) => {
+    try {
+      if (!recordId) {
+        message.error('记录ID无效');
+        return;
+      }
+
+      // 找到当前客户
+      const customer = customers.find(c => c.id === recordId);
+      if (!customer) {
+        message.error('找不到客户信息');
+        return;
+      }
+
+      // 准备更新数据
+      const updateData: Record<string, any> = {};
+      
+      // 方钢和组件需要特殊处理，包括状态字段
+      if (itemType === 'square_steel' || itemType === 'component') {
+        // 获取当前状态
+        const statusField = `${itemType}_status`;
+        const dateField = `${itemType}_outbound_date`; 
+        const status = customer[statusField as keyof Customer] || 'none';
+        
+        // 根据当前状态决定下一个状态
+        if (status === 'none') {
+          // 未出库 -> 出库
+          updateData[dateField] = dayjs().format('YYYY-MM-DD');
+          updateData[statusField] = 'outbound';
+          updateData[`${itemType}_inbound_date`] = null;
+        } else if (status === 'outbound') {
+          // 出库 -> 回库
+          updateData[statusField] = 'inbound';
+          updateData[`${itemType}_inbound_date`] = dayjs().format('YYYY-MM-DD');
+          // 保留出库日期
+        } else if (status === 'inbound') {
+          // 回库 -> 未出库（重置）
+          updateData[dateField] = null;
+          updateData[statusField] = 'none';
+          updateData[`${itemType}_inbound_date`] = null;
+        }
+      } else {
+        // 其他物品简单处理出库日期
+        const statusField = `${itemType}_outbound_date`;
+        const currentStatus = customer[statusField as keyof Customer];
+        
+        // 如果当前有出库日期，则标记为空（撤销出库）
+        // 否则设置为当前日期（标记为已出库）
+        updateData[statusField] = currentStatus ? null : dayjs().format('YYYY-MM-DD');
+      }
+      
+      // 使用updateWithCache方法异步更新
+      await customerApi.updateWithCache(recordId, updateData);
+      
+      // 更新本地状态
+      setCustomers(prev => 
+        prev.map(c => {
+          if (c.id === recordId) {
+            return { ...c, ...updateData };
+          }
+          return c;
+        })
+      );
+      
+      setFilteredCustomers(prev => 
+        prev.map(c => {
+          if (c.id === recordId) {
+            return { ...c, ...updateData };
+          }
+          return c;
+        })
+      );
+      
+      // 根据操作类型显示不同的成功消息
+      const itemNames: Record<string, string> = {
+        'inverter': '逆变器',
+        'copper_wire': '铜线',
+        'aluminum_wire': '铝线',
+        'distribution_box': '配电箱',
+        'square_steel': '方钢',
+        'component': '组件'
+      };
+      
+      // 方钢和组件特殊消息处理
+      let actionText = '';
+      if (itemType === 'square_steel' || itemType === 'component') {
+        const status = updateData[`${itemType}_status`];
+        if (status === 'outbound') {
+          actionText = '已标记为出库';
+        } else if (status === 'inbound') {
+          actionText = '已标记为回库';
+        } else {
+          actionText = '已重置为未出库';
+        }
+      } else {
+        // 其他物品使用通用消息
+        actionText = updateData[`${itemType}_outbound_date`] ? '出库成功' : '已撤销出库';
+      }
+      
+      message.success(`${itemNames[itemType] || '物品'} ${actionText}`);
+      
+    } catch (error) {
+      console.error('更新物品出库状态失败:', error);
+      message.error('更新物品出库状态失败');
+      // 如果出错，刷新列表获取最新数据
+      fetchCustomers();
+    }
+  };
+
   return (
     <div className="customer-list-container" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {renderTitleBar()}
@@ -3301,7 +3475,7 @@ const CustomerList = () => {
       <Form form={editForm} style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ flex: 1, overflow: 'hidden' }}>
           <Table 
-            dataSource={filteredCustomers} 
+            dataSource={paginatedCustomers} 
             columns={columns} 
             rowKey="id"
             loading={loading}
@@ -3482,7 +3656,7 @@ const CustomerList = () => {
               <Button 
                 type="link" 
                 icon={<FileExcelOutlined />} 
-                onClick={handleDownloadTemplate}
+                onClick={() => console.log('模板下载功能已移除')}
               >
                 下载导入模板
               </Button>

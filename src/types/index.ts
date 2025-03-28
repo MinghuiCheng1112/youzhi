@@ -20,7 +20,7 @@ export interface Customer {
   capacity: number // 容量
   investment_amount: number // 投资金额
   land_area: number // 用地面积
-  module_count: number // 组件数量
+  module_count: number | null // 组件数量
   inverter: string // 逆变器
   copper_wire: string // 铜线
   aluminum_wire: string // 铝线
@@ -35,14 +35,20 @@ export interface Customer {
   main_line: string | null // 大线
   large_cable: string | null // 大线
   technical_review: string | null // 技术审核
+  technical_review_date: string | null // 技术审核日期
+  technical_review_notes: string | null // 技术审核备注
   upload_to_grid: string | null // 上传国网
   construction_acceptance: string | null // 建设验收
+  construction_acceptance_date: string | null // 建设验收日期
+  construction_acceptance_notes: string | null // 建设验收备注
   meter_installation_date: string | null // 挂表日期
   power_purchase_contract: string | null // 购售电合同
   status: string | null // 状态
   price: number | null // 价格
   company: 'haoChen' | 'youZhi' | null // 公司
   remarks: string | null // 备注
+  first_contact: string | null // 首次联系日期
+  renewal_status: string | null // 续约状态
   created_at: string
   updated_at: string
   deleted_at: string | null

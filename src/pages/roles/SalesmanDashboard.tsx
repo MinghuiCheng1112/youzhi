@@ -455,6 +455,7 @@ const SalesmanDashboard = () => {
   const { user } = useAuth()
   const [subSalesmen, setSubSalesmen] = useState<any[]>([])  
   const [selectedSalesman, setSelectedSalesman] = useState<string | null>(null)
+  const [viewMode, setViewMode] = useState<'all' | 'own' | 'subs' | 'specific'>('all')
   const [userInfo, setUserInfo] = useState<{name?: string, phone?: string}>({})
   const [stats, setStats] = useState({
     total: 0,
@@ -479,14 +480,18 @@ const SalesmanDashboard = () => {
     fetchCurrentUserInfo()
   }, [user])
   
-  // 当选择的业务员变化时，重新获取客户数据
+  // 当选择的视图模式变化时，重新获取客户数据
   useEffect(() => {
-    if (selectedSalesman) {
+    if (viewMode === 'specific' && selectedSalesman) {
       fetchCustomersBySalesman(selectedSalesman)
-    } else if (user) {
+    } else if (viewMode === 'own') {
+      fetchOwnCustomers()
+    } else if (viewMode === 'subs') {
+      fetchAllSubsCustomers()
+    } else {
       fetchAllCustomers()
     }
-  }, [selectedSalesman])
+  }, [viewMode, selectedSalesman, subSalesmen])
 
   // 计算统计数据
   useEffect(() => {
@@ -627,24 +632,7 @@ const SalesmanDashboard = () => {
         console.log('没有找到子账号数据，添加测试数据');
         if (user.email && user.email.includes('@')) {
           // 创建测试数据
-          const testChildAccounts = [
-            {
-              child_id: 'test-child-1',
-              child: {
-                id: 'test-child-1',
-                email: 'minghuiwu03@2925.com',
-                name: '吴明辉'
-              }
-            },
-            {
-              child_id: 'test-child-2',
-              child: {
-                id: 'test-child-2',
-                email: 'langhuhi@2925.com',
-                name: '郎昊熙'
-              }
-            }
-          ];
+          const testChildAccounts = [];
           
           console.log('添加测试子账号数据:', testChildAccounts);
           setSubSalesmen(testChildAccounts);
@@ -796,58 +784,131 @@ const SalesmanDashboard = () => {
     }
   };
   
+  // 获取所有子账号的客户（不包含自己的客户）
+  const fetchAllSubsCustomers = async () => {
+    try {
+      setLoading(true);
+      // 获取所有客户
+      const data = await customerApi.getAll();
+      
+      // 获取当前业务员邮箱
+      const salesmanEmail = user?.email;
+      if (!salesmanEmail) {
+        console.error('未获取到当前用户邮箱');
+        setCustomers([]);
+        setFilteredCustomers([]);
+        return;
+      }
+      
+      // 获取所有子账号邮箱
+      const childEmails = subSalesmen.map(sub => sub.child?.email).filter(Boolean);
+      
+      console.log('当前业务员邮箱:', salesmanEmail);
+      console.log('子账号邮箱列表:', childEmails);
+      console.log('所有客户数据:', data.length, '条记录');
+      
+      // 如果没有子账号，直接返回空列表
+      if (childEmails.length === 0) {
+        console.log('没有子账号，显示空列表');
+        setCustomers([]);
+        setFilteredCustomers([]);
+        message.info('没有子账号信息');
+        return;
+      }
+      
+      // 过滤出所有子账号的客户（不包括当前业务员的客户）
+      const subsCustomers = data.filter(customer => {
+        if (!customer) return false;
+        
+        // 排除当前业务员的客户
+        
+        // 优先使用salesman_email字段匹配
+        if (customer.salesman_email) {
+          // 如果存在salesman_email字段，检查是否匹配当前业务员
+          const customerSalesmanEmail = String(customer.salesman_email).toLowerCase();
+          
+          // 如果是当前业务员的客户，返回false
+          if (customerSalesmanEmail === salesmanEmail.toLowerCase()) {
+            return false;
+          }
+          
+          // 检查是否匹配任何子账号邮箱
+          const childSalesmanMatch = childEmails.some(childEmail => 
+            childEmail && customerSalesmanEmail === childEmail.toLowerCase()
+          );
+          
+          if (childSalesmanMatch) {
+            console.log('通过salesman_email匹配到子账号客户:', customer.customer_name);
+            return true;
+          }
+        }
+        
+        // 如果没有salesman_email字段，回退到使用salesman字段
+        if (customer.salesman) {
+          // 确保salesman字段存在且是字符串
+          const customerSalesman = String(customer.salesman).toLowerCase();
+          
+          // 检查客户是否属于当前业务员 (邮箱或姓名匹配)
+          const isOwnCustomer = customerSalesman === salesmanEmail.toLowerCase() || 
+                               (userInfo.name && customerSalesman.includes(userInfo.name.toLowerCase()));
+          
+          // 如果是当前业务员的客户，返回false
+          if (isOwnCustomer) {
+            return false;
+          }
+          
+          // 检查客户是否属于子账号 (邮箱匹配)
+          const isChildCustomer = childEmails.some(email => 
+            email && (customerSalesman === email.toLowerCase() || 
+                     customerSalesman.includes(email.toLowerCase()))
+          );
+          
+          // 检查客户是否属于子账号 (名称匹配)
+          const isChildCustomerByName = subSalesmen.some(sub => 
+            sub.child?.name && customerSalesman.includes(String(sub.child.name).toLowerCase())
+          );
+          
+          if (isChildCustomer || isChildCustomerByName) {
+            console.log('通过salesman字段匹配到子账号客户:', customer.customer_name, '业务员:', customer.salesman);
+            return true;
+          }
+        }
+        
+        return false;
+      });
+      
+      console.log('找到所有子账号客户总数:', subsCustomers.length);
+      
+      setCustomers(subsCustomers);
+      setFilteredCustomers(subsCustomers);
+      
+      // 如果没有客户，显示提示信息
+      if (subsCustomers.length === 0) {
+        message.info('所有子账号没有客户信息');
+      }
+    } catch (error) {
+      message.error('获取客户数据失败');
+      console.error('获取客户数据失败:', error);
+      // 确保出错时也设置为空列表
+      setCustomers([]);
+      setFilteredCustomers([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
   // 获取指定业务员的客户
   const fetchCustomersBySalesman = async (salesmanId: string) => {
     try {
       setLoading(true);
       
-      // 如果是查看所有客户
-      if (salesmanId === 'all') {
-        await fetchAllCustomers();
-        return;
-      }
-      
-      // 如果是自己的客户
-      if (salesmanId === 'own') {
-        const data = await customerApi.getAll();
-        const salesmanEmail = user?.email?.toLowerCase();
-        
-        if (!salesmanEmail) {
-          setCustomers([]);
-          setFilteredCustomers([]);
-          return;
-        }
-        
-        // 只过滤出当前业务员的客户
-        const salesmanCustomers = data.filter(customer => {
-          if (!customer) return false;
-          
-          // 优先使用salesman_email字段匹配
-          if (customer.salesman_email) {
-            const customerSalesmanEmail = String(customer.salesman_email).toLowerCase();
-            return customerSalesmanEmail === salesmanEmail;
-          }
-          
-          // 回退到使用salesman字段
-          if (customer.salesman) {
-            const customerSalesman = String(customer.salesman).toLowerCase();
-            return customerSalesman === salesmanEmail || 
-                  (userInfo.name && customerSalesman.includes(userInfo.name.toLowerCase()));
-          }
-          
-          return false;
-        });
-        
-        console.log('找到自己的客户总数:', salesmanCustomers.length);
-        setCustomers(salesmanCustomers);
-        setFilteredCustomers(salesmanCustomers);
-        return;
-      }
-      
       // 获取子账号的信息
       const selectedSalesmanInfo = subSalesmen.find(s => s.child_id === salesmanId)?.child;
       if (!selectedSalesmanInfo) {
         message.error('找不到该业务员');
+        // 确保在找不到业务员时设置空列表
+        setCustomers([]);
+        setFilteredCustomers([]);
         return;
       }
       
@@ -879,7 +940,7 @@ const SalesmanDashboard = () => {
           
           // 尝试通过邮箱或名称匹配
           const matchByEmailInName = selectedSalesmanEmail && customerSalesman === selectedSalesmanEmail.toLowerCase();
-          const matchByName = selectedSalesmanName && customerSalesman.includes(selectedSalesmanName.toLowerCase());
+          const matchByName = selectedSalesmanName && customerSalesman.includes(String(selectedSalesmanName).toLowerCase());
           
           if (matchByEmailInName || matchByName) {
             console.log(`通过salesman字段匹配到子账号 ${selectedSalesmanName} 的客户:`, customer.customer_name, 
@@ -894,11 +955,72 @@ const SalesmanDashboard = () => {
       
       console.log(`找到业务员 ${selectedSalesmanName} (${selectedSalesmanEmail}) 的客户总数:`, salesmanCustomers.length);
       
+      // 即使找不到客户，也要设置为空数组
       setCustomers(salesmanCustomers);
       setFilteredCustomers(salesmanCustomers);
+
+      // 如果没有客户，显示提示信息
+      if (salesmanCustomers.length === 0) {
+        message.info(`${selectedSalesmanName || '所选子账号'}没有客户信息`);
+      }
     } catch (error) {
       message.error('获取客户数据失败');
       console.error('获取客户数据失败:', error);
+      // 确保出错时也设置为空列表
+      setCustomers([]);
+      setFilteredCustomers([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // 获取仅自己的客户
+  const fetchOwnCustomers = async () => {
+    try {
+      setLoading(true);
+      const data = await customerApi.getAll();
+      const salesmanEmail = user?.email?.toLowerCase();
+      
+      if (!salesmanEmail) {
+        setCustomers([]);
+        setFilteredCustomers([]);
+        return;
+      }
+      
+      // 只过滤出当前业务员的客户
+      const salesmanCustomers = data.filter(customer => {
+        if (!customer) return false;
+        
+        // 优先使用salesman_email字段匹配
+        if (customer.salesman_email) {
+          const customerSalesmanEmail = String(customer.salesman_email).toLowerCase();
+          return customerSalesmanEmail === salesmanEmail;
+        }
+        
+        // 回退到使用salesman字段
+        if (customer.salesman) {
+          const customerSalesman = String(customer.salesman).toLowerCase();
+          return customerSalesman === salesmanEmail || 
+                (userInfo.name && customerSalesman.includes(userInfo.name.toLowerCase()));
+        }
+        
+        return false;
+      });
+      
+      console.log('找到自己的客户总数:', salesmanCustomers.length);
+      setCustomers(salesmanCustomers);
+      setFilteredCustomers(salesmanCustomers);
+      
+      // 如果没有客户，显示提示信息
+      if (salesmanCustomers.length === 0) {
+        message.info('您没有客户信息');
+      }
+    } catch (error) {
+      message.error('获取客户数据失败');
+      console.error('获取客户数据失败:', error);
+      // 确保出错时也设置为空列表
+      setCustomers([]);
+      setFilteredCustomers([]);
     } finally {
       setLoading(false);
     }
@@ -1646,19 +1768,34 @@ const SalesmanDashboard = () => {
             />
             {subSalesmen.length > 0 && (
               <Select 
-                placeholder="切换下级业务员" 
+                placeholder="选择数据范围" 
                 style={{ width: 200 }}
-                value={selectedSalesman || 'all'}
-                onChange={(value) => setSelectedSalesman(value)}
+                value={viewMode}
+                onChange={(value) => {
+                  setViewMode(value);
+                  if (value !== 'specific') {
+                    setSelectedSalesman(null);
+                  }
+                }}
                 dropdownStyle={{ maxWidth: 300 }}
               >
-                <Select.Option value="all">所有客户</Select.Option>
-                <Select.Option value="own">我的客户</Select.Option>
-                {subSalesmen.map(sub => (
-                  <Select.Option key={sub.child_id} value={sub.child_id}>
-                    {sub.child.name || sub.child.email}
-                  </Select.Option>
-                ))}
+                <Select.Option value="all">所有客户(我和子账号)</Select.Option>
+                <Select.Option value="own">仅我的客户</Select.Option>
+                <Select.Option value="subs">所有子账号客户</Select.Option>
+                <Select.OptGroup label="选择特定子账号">
+                  {subSalesmen.map(sub => (
+                    <Select.Option 
+                      key={sub.child_id} 
+                      value={`specific_${sub.child_id}`}
+                      onClick={() => {
+                        setViewMode('specific');
+                        setSelectedSalesman(sub.child_id);
+                      }}
+                    >
+                      {sub.child.name || sub.child.email}
+                    </Select.Option>
+                  ))}
+                </Select.OptGroup>
               </Select>
             )}
           </Space>

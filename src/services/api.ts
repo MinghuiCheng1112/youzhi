@@ -1,6 +1,310 @@
 import { Customer, ImportResult } from '../types'
 import { calculateAllFields } from '../utils/calculationUtils'
+import { createClient } from '@supabase/supabase-js';
 import { supabase } from './supabase';
+
+// 在发送请求前处理字段的工具函数
+function processNumericFields(data: any): any {
+  if (!data) return data;
+  
+  console.log('处理数字字段前的数据:', JSON.stringify(data));
+  
+  // 定义需要处理的数字字段
+  const numberFields = ['module_count', 'capacity', 'investment_amount', 'land_area', 'price'];
+  
+  // 创建一个新对象或数组，避免修改原始数据
+  let processedData = Array.isArray(data) ? [...data] : {...data};
+  
+  // 处理单个对象的函数
+  const processObject = (obj: any) => {
+    const result = {...obj};
+    numberFields.forEach(field => {
+      if (field in result) {
+        const value = result[field];
+        
+        // 检查是否为空值或无效数值
+        if (value === '' || value === undefined || value === null || 
+            (typeof value === 'string' && value.trim() === '') || 
+            (typeof value === 'number' && isNaN(value))) {
+          result[field] = null;
+          console.log(`将${field}字段的空值转换为null，原始值:`, value);
+        }
+        // 如果是字符串，尝试转换为数字
+        else if (typeof value === 'string') {
+          const numValue = Number(value);
+          if (!isNaN(numValue)) {
+            result[field] = numValue;
+            console.log(`将${field}字段的字符串值转换为数字: ${value} -> ${numValue}`);
+          } else {
+            result[field] = null;
+            console.log(`将${field}字段的无效数字字符串转换为null: ${value}`);
+          }
+        }
+      }
+    });
+    return result;
+  };
+  
+  // 根据数据类型处理
+  if (Array.isArray(processedData)) {
+    processedData = processedData.map(item => processObject(item));
+  } else {
+    processedData = processObject(processedData);
+  }
+  
+  console.log('处理数字字段后的数据:', JSON.stringify(processedData));
+  return processedData;
+}
+
+// 使用修改后的工具函数定义Supabase直接修改函数
+const originalUpdate = supabase.from('customers').update;
+supabase.from('customers').update = function(data: any) {
+  // 预处理数据
+  const processedData = processNumericFields(data);
+  // 调用原始方法
+  return originalUpdate.call(this, processedData);
+};
+
+/**
+ * 数据缓存服务
+ * 实现前端数据修改直接反映在界面上，并在后台静默推送到数据库
+ */
+class DataCacheService {
+  private cache: Map<string, Customer> = new Map();
+  private updateQueue: Map<string, {id: string, updates: Partial<Customer>, retryCount?: number}> = new Map();
+  private isProcessing: boolean = false;
+  private static instance: DataCacheService;
+
+  private constructor() {
+    // 设置定期处理队列
+    setInterval(() => this.processUpdateQueue(), 1000); // 每秒处理一次队列
+  }
+
+  public static getInstance(): DataCacheService {
+    if (!DataCacheService.instance) {
+      DataCacheService.instance = new DataCacheService();
+    }
+    return DataCacheService.instance;
+  }
+
+  // 初始化缓存
+  public initCache(customers: Customer[]): void {
+    customers.forEach(customer => {
+      if (customer.id) {
+        this.cache.set(customer.id, {...customer});
+      }
+    });
+  }
+
+  // 获取缓存的所有客户数据
+  public getAllCustomers(): Customer[] {
+    return Array.from(this.cache.values());
+  }
+
+  // 获取单个客户数据
+  public getCustomer(id: string): Customer | undefined {
+    return this.cache.get(id);
+  }
+
+  // 更新客户数据并加入更新队列
+  public updateCustomer(id: string, updates: Partial<Customer>): Customer {
+    const customer = this.cache.get(id);
+    if (!customer) {
+      throw new Error(`Customer with id ${id} not found in cache`);
+    }
+
+    // 处理数字字段，确保空字符串转换为null
+    const processedUpdates = { ...updates };
+    const numberFields = ['module_count', 'capacity', 'investment_amount', 'land_area', 'price'];
+    numberFields.forEach(field => {
+      if (field in processedUpdates) {
+        const value = (processedUpdates as any)[field];
+        console.log(`预处理${field}字段，原始值:`, value, `类型:`, typeof value);
+        
+        // 处理空字符串、undefined和null
+        if (value === '' || value === undefined || value === null) {
+          (processedUpdates as any)[field] = null;
+          console.log(`将${field}字段的空值转换为null`);
+        }
+        // 处理数字或数字字符串
+        else if (typeof value === 'string') {
+          // 如果是数字字符串，转换为数字
+          const numValue = Number(value);
+          if (!isNaN(numValue)) {
+            (processedUpdates as any)[field] = numValue;
+            console.log(`将${field}字段的字符串值转换为数字: ${value} -> ${numValue}`);
+          } else {
+            // 如果是非数字字符串，设置为null
+            (processedUpdates as any)[field] = null;
+            console.log(`将${field}字段的非数字字符串值转换为null: ${value}`);
+          }
+        }
+      }
+    });
+    
+    // 更新本地缓存
+    const updatedCustomer = {...customer, ...processedUpdates};
+    this.cache.set(id, updatedCustomer);
+
+    // 将更新加入队列
+    this.updateQueue.set(id, {id, updates: processedUpdates});
+
+    // 如果当前没有在处理队列，启动处理
+    if (!this.isProcessing) {
+      this.processUpdateQueue();
+    }
+
+    return updatedCustomer;
+  }
+
+  // 添加新客户到缓存
+  public addCustomer(customer: Customer): void {
+    if (customer.id) {
+      this.cache.set(customer.id, {...customer});
+    }
+  }
+
+  // 从缓存中删除客户
+  public removeCustomer(id: string): void {
+    this.cache.delete(id);
+  }
+
+  // 处理更新队列
+  private async processUpdateQueue(): Promise<void> {
+    if (this.isProcessing || this.updateQueue.size === 0) {
+      return;
+    }
+
+    this.isProcessing = true;
+    console.log(`开始处理更新队列，队列长度: ${this.updateQueue.size}`);
+
+    try {
+      // 创建队列快照，以便在处理过程中可以安全添加新的更新
+      const updates = Array.from(this.updateQueue.values());
+      // 临时清空队列，失败的更新会重新加入
+      this.updateQueue.clear();
+
+      // 分批处理更新，避免同时发送太多请求
+      const batchSize = 5;
+      for (let i = 0; i < updates.length; i += batchSize) {
+        const batch = updates.slice(i, i + batchSize);
+        
+        // 并行处理一批更新，但记录每个更新的结果，不会因为一个失败就中断整个过程
+        await Promise.all(batch.map(async (update) => {
+          try {
+            // 预处理数据，确保类型正确，特别是处理空字符串
+            const processedUpdates = { ...update.updates };
+            
+            // 在发送数据库请求前打印详细内容，帮助调试
+            console.log(`准备静默更新客户数据(ID: ${update.id}): `, JSON.stringify(processedUpdates));
+            
+            // 再次处理数字字段，以确保数据库安全
+            const numberFields = ['module_count', 'capacity', 'investment_amount', 'land_area', 'price'];
+            numberFields.forEach(field => {
+              if (field in processedUpdates) {
+                const value = (processedUpdates as any)[field];
+                
+                // 记录字段类型，帮助调试
+                console.log(`【最终检查】${field}字段值:`, value, `类型:`, typeof value);
+                
+                // 严格检查并处理空字符串、undefined和null
+                if (value === '' || value === undefined || value === null || 
+                    (typeof value === 'string' && value.trim() === '') || 
+                    (typeof value === 'number' && isNaN(value))) {
+                  (processedUpdates as any)[field] = null;
+                  console.log(`【最终检查】将${field}字段的空值转换为null`);
+                } 
+                // 处理字符串数字
+                else if (typeof value === 'string') {
+                  // 尝试将非空字符串转换为数字
+                  const numValue = Number(value);
+                  if (!isNaN(numValue)) {
+                    (processedUpdates as any)[field] = numValue;
+                    console.log(`【最终检查】将${field}字段的字符串值转换为数字: ${value} -> ${numValue}`);
+                  } else {
+                    // 如果转换失败，设置为null
+                    (processedUpdates as any)[field] = null;
+                    console.log(`【最终检查】将${field}字段的无效数字字符串值转换为null: ${value}`);
+                  }
+                }
+              }
+            });
+            
+            // 特殊处理construction_status字段
+            if ('construction_status' in processedUpdates) {
+              const value = (processedUpdates as any)['construction_status'];
+              console.log(`【最终检查】construction_status字段值:`, value, `类型:`, typeof value);
+              
+              // 如果是空值或false，设置为null
+              if (value === '' || value === undefined || value === false) {
+                (processedUpdates as any)['construction_status'] = null;
+                console.log(`【最终检查】将construction_status字段的空值转换为null`);
+              } 
+              // 如果是true，转换为当前时间的ISO字符串
+              else if (value === true) {
+                (processedUpdates as any)['construction_status'] = new Date().toISOString();
+                console.log(`【最终检查】将construction_status字段的布尔值转换为日期: ${(processedUpdates as any)['construction_status']}`);
+              }
+              // 保留字符串值(日期字符串)
+            }
+            
+            // 打印最终将发送到数据库的数据
+            console.log(`最终发送到数据库的更新数据:`, JSON.stringify(processedUpdates));
+            
+            // 使用处理后的更新
+            await customerApi.update(update.id, processedUpdates);
+            console.log(`静默更新客户数据成功: ${update.id}`);
+          } catch (error) {
+            // 增强错误日志记录
+            console.error(`静默更新客户数据失败: ${update.id}`, error);
+            console.error(`失败的更新数据: `, JSON.stringify(update.updates));
+            if (error instanceof Error) {
+              console.error(`错误详情: ${error.name} - ${error.message}`);
+              console.error(`错误堆栈: ${error.stack}`);
+            }
+            
+            // 检查特定字段类型
+            const updateData = update.updates;
+            if (updateData && 'construction_status' in updateData) {
+              console.error(`失败更新中construction_status字段值: ${(updateData as any).construction_status}, 类型: ${typeof (updateData as any).construction_status}`);
+            }
+            
+            // 如果更新失败，将更新放回队列
+            this.updateQueue.set(update.id, update);
+            
+            // 添加重试次数记录
+            update.retryCount = (update.retryCount || 0) + 1;
+            
+            // 如果重试超过5次，放弃此更新并记录错误
+            if (update.retryCount > 5) {
+              console.error(`静默更新客户数据失败超过最大重试次数，放弃更新: ${update.id}`, update.updates);
+              this.updateQueue.delete(update.id);
+            }
+          }
+        }));
+        
+        // 批次间添加短暂的延迟，避免过多的并发请求
+        if (i + batchSize < updates.length) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+    } catch (error) {
+      console.error('处理更新队列出错:', error);
+    } finally {
+      this.isProcessing = false;
+      console.log(`更新队列处理完成，剩余队列长度: ${this.updateQueue.size}`);
+
+      // 如果队列中还有更新，继续处理
+      if (this.updateQueue.size > 0) {
+        // 延迟一秒后继续处理队列
+        setTimeout(() => this.processUpdateQueue(), 1000);
+      }
+    }
+  }
+}
+
+// 导出数据缓存服务实例
+export const dataCacheService = DataCacheService.getInstance();
 
 /**
  * 客户相关API
@@ -25,6 +329,12 @@ export const customerApi = {
       .order('created_at', { ascending: false })
 
     if (error) throw error
+    
+    // 初始化数据缓存
+    if (data) {
+      dataCacheService.initCache(data);
+    }
+    
     return data || []
   },
 
@@ -34,6 +344,12 @@ export const customerApi = {
    * @returns {Promise<Customer | null>} 客户对象或null
    */
   getById: async (id: string): Promise<Customer | null> => {
+    // 尝试从缓存获取
+    const cachedCustomer = dataCacheService.getCustomer(id);
+    if (cachedCustomer) {
+      return cachedCustomer;
+    }
+
     const { data, error } = await supabase
       .from('customers')
       .select('*')
@@ -41,6 +357,12 @@ export const customerApi = {
       .single()
 
     if (error) throw error
+    
+    // 添加到缓存
+    if (data) {
+      dataCacheService.addCustomer(data);
+    }
+    
     return data
   },
 
@@ -58,6 +380,12 @@ export const customerApi = {
       .single()
 
     if (error) throw error
+    
+    // 添加到缓存
+    if (data) {
+      dataCacheService.addCustomer(data);
+    }
+    
     return data
   },
 
@@ -72,27 +400,216 @@ export const customerApi = {
    */
   update: async (id: string, customer: UpdateCustomerInput): Promise<Customer> => {
     // 添加日志查看更新的数据
-    console.log('更新客户数据:', id, JSON.stringify(customer));
+    console.log('更新客户数据(ID:', id, '):', JSON.stringify(customer));
     
     // 创建一个副本
     const updatedCustomer = { ...customer };
     
-    // 特殊处理drawing_change字段，确保是布尔类型
-    if ('drawing_change' in updatedCustomer) {
-      const drawingChange = updatedCustomer.drawing_change;
-      updatedCustomer.drawing_change = Boolean(drawingChange);
-      console.log('处理后的drawing_change值:', updatedCustomer.drawing_change, '类型:', typeof updatedCustomer.drawing_change);
+    // 如果module_count为空值，同时将相关计算字段设置为空值
+    if ('module_count' in updatedCustomer) {
+      const moduleCount = (updatedCustomer as any).module_count;
+      if (moduleCount === null || moduleCount === undefined || 
+          moduleCount === '' || 
+          (typeof moduleCount === 'number' && (isNaN(moduleCount) || moduleCount <= 0))) {
+        // 确保module_count为null
+        (updatedCustomer as any).module_count = null;
+        // 相关字段也设置为null
+        (updatedCustomer as any).capacity = null;
+        (updatedCustomer as any).investment_amount = null;
+        (updatedCustomer as any).land_area = null;
+        console.log('update方法: module_count为空值，相关计算字段也设置为null');
+      }
     }
     
-    const { data, error } = await supabase
-      .from('customers')
-      .update(updatedCustomer)
-      .eq('id', id)
-      .select()
-      .single()
+    // 详细处理数字字段
+    const numberFields = ['module_count', 'capacity', 'investment_amount', 'land_area', 'price'];
+    numberFields.forEach(field => {
+      if (field in updatedCustomer) {
+        const value = updatedCustomer[field as keyof UpdateCustomerInput];
+        
+        // 详细记录字段处理
+        console.log(`update方法处理${field}字段，原始值:`, value, `类型:`, typeof value);
+        
+        // 严格处理各种空值情况
+        if (value === '' || value === undefined || value === null || 
+            (typeof value === 'string' && value.trim() === '') || 
+            (typeof value === 'number' && isNaN(value))) {
+          (updatedCustomer as any)[field] = null;
+          console.log(`update方法将${field}字段的空值转换为null`);
+        } 
+        // 处理可能是数字的字符串
+        else if (typeof value === 'string' && value.trim() !== '') {
+          // 尝试将非空字符串转换为数字
+          const numValue = Number(value);
+          if (!isNaN(numValue)) {
+            (updatedCustomer as any)[field] = numValue;
+            console.log(`update方法将${field}字段的字符串值转换为数字: ${value} -> ${numValue}`);
+          } else {
+            // 如果转换失败，设置为null
+            (updatedCustomer as any)[field] = null;
+            console.log(`update方法将${field}字段的无效数字字符串值转换为null: ${value}`);
+          }
+        }
+      }
+    });
+    
+    // 特殊处理construction_status字段
+    if ('construction_status' in updatedCustomer) {
+      const value = (updatedCustomer as any)['construction_status'];
+      console.log(`update方法处理construction_status字段，原始值:`, value, `类型:`, typeof value);
+      
+      // 如果是空值或false，设置为null
+      if (value === '' || value === undefined || value === false) {
+        (updatedCustomer as any)['construction_status'] = null;
+        console.log(`update方法将construction_status字段的空值转换为null`);
+      } 
+      // 如果是true，转换为当前时间的ISO字符串
+      else if (value === true) {
+        (updatedCustomer as any)['construction_status'] = new Date().toISOString();
+        console.log(`update方法将construction_status字段的布尔值转换为日期: ${(updatedCustomer as any)['construction_status']}`);
+      }
+      // 其他情况保持原值(应该是日期字符串或null)
+    }
+    
+    // 记录最终将发送到数据库的数据
+    console.log(`update方法最终发送到数据库的数据(ID: ${id}):`, JSON.stringify(updatedCustomer));
+    
+    try {
+      const { data, error } = await supabase
+        .from('customers')
+        .update(updatedCustomer)
+        .eq('id', id)
+        .select()
+        .single();
 
-    if (error) throw error
-    return data
+      if (error) {
+        console.error(`update方法更新失败:`, error);
+        throw error;
+      }
+      
+      // 更新缓存
+      if (data) {
+        dataCacheService.addCustomer(data);
+        console.log(`update方法更新成功，返回数据:`, JSON.stringify(data));
+      } else {
+        console.warn(`update方法更新成功但未返回数据，ID: ${id}`);
+      }
+      
+      return data;
+    } catch (error) {
+      console.error(`update方法更新出错:`, error);
+      // 重新抛出错误，让调用者处理
+      throw error;
+    }
+  },
+
+  /**
+   * 使用缓存服务更新客户信息（前端立即更新，后台静默推送）
+   * 支持所有类型的字段更新
+   * @param {string} id - 客户ID
+   * @param {Partial<Customer>} updates - 更新的客户信息
+   * @returns {Customer} 更新后的客户对象（从缓存中获取）
+   */
+  updateWithCache: (id: string, updates: UpdateCustomerInput): Customer => {
+    // 处理特殊字段类型
+    const processedUpdates = { ...updates };
+    
+    // 记录原始数据，帮助调试
+    console.log(`updateWithCache原始数据(ID: ${id}):`, JSON.stringify(processedUpdates));
+    
+    // 如果module_count为空值，同时将相关计算字段设置为空值
+    if ('module_count' in processedUpdates) {
+      const moduleCount = (processedUpdates as any).module_count;
+      if (moduleCount === null || moduleCount === undefined || 
+          moduleCount === '' || 
+          (typeof moduleCount === 'number' && (isNaN(moduleCount) || moduleCount <= 0))) {
+        // 确保module_count为null
+        (processedUpdates as any).module_count = null;
+        // 相关字段也设置为null
+        (processedUpdates as any).capacity = null;
+        (processedUpdates as any).investment_amount = null;
+        (processedUpdates as any).land_area = null;
+        console.log('updateWithCache: module_count为空值，相关计算字段也设置为null');
+      }
+    }
+    
+    // 处理数字字段，确保空字符串转换为null
+    const numberFields = ['module_count', 'capacity', 'investment_amount', 'land_area', 'price'];
+    numberFields.forEach(field => {
+      if (field in processedUpdates) {
+        const value = (processedUpdates as any)[field];
+        
+        // 记录更详细的类型信息
+        console.log(`updateWithCache处理${field}字段，原始值:`, value, `类型:`, typeof value);
+        
+        // 更严格地处理各种空值情况
+        if (value === '' || value === undefined || value === null || 
+            (typeof value === 'string' && value.trim() === '') || 
+            (typeof value === 'number' && isNaN(value))) {
+          (processedUpdates as any)[field] = null;
+          console.log(`updateWithCache将${field}字段的空值转换为null`);
+        } 
+        // 处理可能是数字的字符串
+        else if (typeof value === 'string' && value.trim() !== '') {
+          // 尝试将非空字符串转换为数字
+          const numValue = Number(value);
+          if (!isNaN(numValue)) {
+            (processedUpdates as any)[field] = numValue;
+            console.log(`updateWithCache将${field}字段的字符串值转换为数字: ${value} -> ${numValue}`);
+          } else {
+            // 如果转换失败，设置为null
+            (processedUpdates as any)[field] = null;
+            console.log(`updateWithCache将${field}字段的无效数字字符串值转换为null: ${value}`);
+          }
+        }
+      }
+    });
+    
+    // 处理日期字段
+    const dateFields = ['register_date', 'filing_date', 'dispatch_date', 'meter_installation_date'];
+    dateFields.forEach(field => {
+      if (field in processedUpdates && processedUpdates[field as keyof UpdateCustomerInput]) {
+        const dateValue = processedUpdates[field as keyof UpdateCustomerInput];
+        if (dateValue && typeof dateValue === 'object' && 'toISOString' in dateValue) {
+          // 如果是日期对象，转换为ISO字符串
+          (processedUpdates as any)[field] = (dateValue as unknown as { toISOString(): string }).toISOString();
+        }
+      }
+    });
+    
+    // 处理布尔字段，确保正确转换
+    // construction_status字段特殊处理，它实际上是一个日期字符串或null，而不是布尔值
+    const boolFields = ['construction_acceptance', 'technical_review'];
+    boolFields.forEach(field => {
+      if (field in processedUpdates) {
+        const boolValue = processedUpdates[field as keyof UpdateCustomerInput];
+        if (typeof boolValue === 'string') {
+          // 转换字符串到布尔值
+          (processedUpdates as any)[field] = boolValue.toLowerCase() === 'true';
+        }
+      }
+    });
+    
+    // 特殊处理construction_status字段，确保它是日期字符串或null
+    if ('construction_status' in processedUpdates) {
+      const value = processedUpdates['construction_status' as keyof UpdateCustomerInput];
+      console.log(`处理construction_status字段，原始值:`, value, `类型:`, typeof value);
+      
+      // 如果是空值，设置为null
+      if (value === '' || value === undefined || value === false) {
+        (processedUpdates as any)['construction_status'] = null;
+      } 
+      // 如果是true，转换为当前时间的ISO字符串
+      else if (value === true) {
+        (processedUpdates as any)['construction_status'] = new Date().toISOString();
+      }
+      // 其他情况保持原值(应该是日期字符串或null)
+    }
+    
+    // 记录最终将发送到数据缓存的数据
+    console.log(`updateWithCache最终处理后的数据(ID: ${id}):`, JSON.stringify(processedUpdates));
+    
+    return dataCacheService.updateCustomer(id, processedUpdates);
   },
 
   /**
@@ -108,6 +625,23 @@ export const customerApi = {
       .eq('id', id)
 
     if (error) throw error
+    
+    // 从缓存中移除
+    dataCacheService.removeCustomer(id);
+  },
+
+  /**
+   * 使用缓存服务删除客户（前端立即删除，后台静默处理）
+   * @param {string} id - 客户ID
+   */
+  deleteWithCache: (id: string): void => {
+    // 从缓存中移除
+    dataCacheService.removeCustomer(id);
+    
+    // 后台静默删除
+    customerApi.delete(id).catch(error => {
+      console.error('静默删除客户失败:', error);
+    });
   },
 
   /**
@@ -515,6 +1049,34 @@ export const customerApi = {
     
     if (error) throw error;
     return data;
+  },
+  
+  /**
+   * 更新催单状态(带缓存)
+   * 如果客户当前没有催单，则添加当前时间作为催单时间；
+   * 如果客户已有催单，则删除催单时间
+   * 使用数据缓存服务实现UI立即更新，后台静默推送
+   * @param {string} id - 客户ID
+   * @returns {Customer} 更新后的客户对象
+   */
+  updateUrgeOrderWithCache: (id: string): Customer => {
+    // 获取当前客户状态
+    const customer = dataCacheService.getCustomer(id);
+    if (!customer) {
+      throw new Error(`Customer with id ${id} not found in cache`);
+    }
+    
+    // 根据当前状态确定新的催单值
+    const newUrgeOrderValue = customer.urge_order ? null : new Date().toISOString();
+    
+    // 更新本地缓存
+    const updatedCustomer = {...customer, urge_order: newUrgeOrderValue};
+    dataCacheService.addCustomer(updatedCustomer);
+    
+    // 将更新加入队列
+    dataCacheService.updateCustomer(id, { urge_order: newUrgeOrderValue });
+    
+    return updatedCustomer;
   },
 }
 

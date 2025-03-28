@@ -1,10 +1,14 @@
 {
-  "name": "customer-management-scripts",
+  "name": "customer-management-system-scripts",
   "version": "1.0.0",
   "description": "数据库维护脚本",
-  "type": "module",
+  "type": "commonjs",
   "private": true,
   "dependencies": {
+    "@supabase/supabase-js": "^2.49.3",
     "pg": "^8.14.1"
+  },
+  "devDependencies": {
+    "dotenv": "^16.4.7"
   }
 }

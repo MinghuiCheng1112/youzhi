@@ -231,24 +231,6 @@ const DeletedRecords: React.FC = () => {
             </Button>
           </Space>
         </div>
-        
-        <Spin spinning={loading}>
-          {records.length > 0 ? (
-            <Table
-              rowSelection={rowSelection}
-              rowKey="id"
-              columns={columns}
-              dataSource={records}
-              pagination={pagination}
-              onChange={handleTableChange}
-            />
-          ) : (
-            <Empty 
-              description="没有找到已删除的记录" 
-              image={Empty.PRESENTED_IMAGE_SIMPLE} 
-            />
-          )}
-        </Spin>
       </Card>
     </div>
   );

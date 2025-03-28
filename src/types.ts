@@ -47,6 +47,8 @@ export interface Customer {
   technical_review_rejected?: string | null;
   upload_to_grid?: string | null;
   construction_acceptance?: string | null;
+  construction_acceptance_date?: string | null;
+  construction_acceptance_notes?: string | null;
   meter_installation_date?: string | null;
   power_purchase_contract?: string | null;
   status?: string;

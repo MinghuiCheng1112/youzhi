@@ -7,7 +7,8 @@
  * 根据组件数量计算容量（KW）
  * 容量 = 组件数量 * 0.71KW
  */
-export const calculateCapacity = (moduleCount: number): number => {
+export const calculateCapacity = (moduleCount: number | null): number => {
+  if (moduleCount === null) return 0;
   return parseFloat((moduleCount * 0.71).toFixed(2))
 }
 
@@ -15,7 +16,8 @@ export const calculateCapacity = (moduleCount: number): number => {
  * 根据组件数量计算投资金额
  * 投资金额 = 组件数量 * 0.71 * 0.25
  */
-export const calculateInvestmentAmount = (moduleCount: number): number => {
+export const calculateInvestmentAmount = (moduleCount: number | null): number => {
+  if (moduleCount === null) return 0;
   return parseFloat((moduleCount * 0.71 * 0.25).toFixed(2))
 }
 
@@ -23,14 +25,17 @@ export const calculateInvestmentAmount = (moduleCount: number): number => {
  * 根据组件数量计算用地面积（m²）
  * 用地面积 = 组件数量 * 3.106m²
  */
-export const calculateLandArea = (moduleCount: number): number => {
+export const calculateLandArea = (moduleCount: number | null): number => {
+  if (moduleCount === null) return 0;
   return parseFloat((moduleCount * 3.106).toFixed(2))
 }
 
 /**
  * 根据组件数量确定逆变器型号
  */
-export const determineInverter = (moduleCount: number): string => {
+export const determineInverter = (moduleCount: number | null): string => {
+  if (moduleCount === null || moduleCount === 0) return '';
+  
   if (moduleCount >= 10 && moduleCount <= 13) return 'SN8.0PT-C'
   if (moduleCount >= 14 && moduleCount <= 16) return 'SN10PT-C'
   if (moduleCount >= 17 && moduleCount <= 20) return 'SN12PT-C'
@@ -45,15 +50,15 @@ export const determineInverter = (moduleCount: number): string => {
   if (moduleCount >= 60 && moduleCount <= 67) return 'SN40PT-C'
   if (moduleCount >= 68 && moduleCount <= 83) return 'SN50PT-B'
   if (moduleCount >= 84 && moduleCount <= 97) return 'SN60PT'
-  if (moduleCount < 10) return '组件数量过少，无法确定逆变器型号'
-  return '组件数量过多，请手动选择逆变器型号'
+  if (moduleCount < 10) return '-'
+  return 'N+N'
 }
 
 /**
  * 根据逆变器型号确定配电箱规格
  */
 export const determineDistributionBox = (inverter: string): string => {
-  if (inverter.includes('组件数量')) return ''
+  if (inverter.includes('组件数量') || inverter === '-') return ''
   
   if (inverter <= 'SN30PT-C') return '30kWp'
   if (inverter > 'SN30PT-C' && inverter <= 'SN50PT-B') return '50kWp'
@@ -66,7 +71,7 @@ export const determineDistributionBox = (inverter: string): string => {
  * 根据逆变器型号确定铜线规格
  */
 export const determineCopperWire = (inverter: string): string => {
-  if (inverter.includes('组件数量')) return ''
+  if (inverter.includes('组件数量') || inverter === '-') return ''
   
   if (inverter <= 'SN20PT-B') return '3*10mm²'
   if (inverter > 'SN20PT-B' && inverter <= 'SN30PT-C') return '3*16mm²'
@@ -80,7 +85,7 @@ export const determineCopperWire = (inverter: string): string => {
  * 根据逆变器型号确定铝线规格
  */
 export const determineAluminumWire = (inverter: string): string => {
-  if (inverter.includes('组件数量')) return ''
+  if (inverter.includes('组件数量') || inverter === '-') return ''
   
   if (inverter <= 'SN20PT-B') return '3*16mm²'
   if (inverter > 'SN20PT-B' && inverter <= 'SN30PT-C') return '3*25mm²'
@@ -94,7 +99,20 @@ export const determineAluminumWire = (inverter: string): string => {
 /**
  * 计算所有相关字段
  */
-export const calculateAllFields = (moduleCount: number) => {
+export const calculateAllFields = (moduleCount: number | null) => {
+  // 如果moduleCount为null、0或过少(小于10)，返回所有字段为null的默认值
+  if (moduleCount === null || moduleCount === 0 || moduleCount < 10) {
+    return {
+      capacity: moduleCount ? calculateCapacity(moduleCount) : 0,
+      investment_amount: moduleCount ? calculateInvestmentAmount(moduleCount) : 0,
+      land_area: moduleCount ? calculateLandArea(moduleCount) : 0,
+      inverter: null,
+      distribution_box: null,
+      copper_wire: null,
+      aluminum_wire: null
+    }
+  }
+  
   const capacity = calculateCapacity(moduleCount)
   const investmentAmount = calculateInvestmentAmount(moduleCount)
   const landArea = calculateLandArea(moduleCount)

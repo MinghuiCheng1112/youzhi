@@ -87,6 +87,7 @@ const CustomerForm = () => {
     
     const fields = calculateAllFields(value)
     form.setFieldsValue(fields)
+    console.log('根据组件数量自动计算的字段:', fields)
   }
 
   // 提交表单
@@ -632,12 +633,12 @@ const CustomerForm = () => {
             <Form.Item
               name="module_count"
               label="组件数量"
+              rules={[{ required: true, message: '请输入组件数量' }]}
             >
-              <InputNumber 
-                style={{ width: '100%' }} 
-                min={1} 
+              <InputNumber
+                style={{ width: '100%' }}
                 onChange={handleModuleCountChange}
-                disabled={!canEdit()}
+                placeholder="输入后自动计算相关字段"
               />
             </Form.Item>
           </Col>
@@ -645,11 +646,11 @@ const CustomerForm = () => {
           <Col xs={24} sm={12} md={8}>
             <Form.Item
               name="capacity"
-              label="容量 (KW)"
+              label="容量 (kW)"
             >
               <InputNumber 
                 style={{ width: '100%' }} 
-                disabled 
+                readOnly 
                 formatter={(value) => value ? `${value}` : ''}
               />
             </Form.Item>
@@ -662,7 +663,7 @@ const CustomerForm = () => {
             >
               <InputNumber 
                 style={{ width: '100%' }} 
-                disabled
+                readOnly
                 formatter={(value) => value ? `${value}` : ''}
               />
             </Form.Item>
@@ -675,7 +676,7 @@ const CustomerForm = () => {
             >
               <InputNumber 
                 style={{ width: '100%' }} 
-                disabled
+                readOnly
                 formatter={(value) => value ? `${value}` : ''}
               />
             </Form.Item>
@@ -686,7 +687,7 @@ const CustomerForm = () => {
               name="inverter"
               label="逆变器"
             >
-              <Input disabled />
+              <Input readOnly />
             </Form.Item>
           </Col>
           
@@ -695,7 +696,7 @@ const CustomerForm = () => {
               name="copper_wire"
               label="铜线"
             >
-              <Input disabled />
+              <Input readOnly />
             </Form.Item>
           </Col>
           
@@ -704,7 +705,7 @@ const CustomerForm = () => {
               name="aluminum_wire"
               label="铝线"
             >
-              <Input disabled />
+              <Input readOnly />
             </Form.Item>
           </Col>
           
@@ -713,7 +714,7 @@ const CustomerForm = () => {
               name="distribution_box"
               label="配电箱"
             >
-              <Input disabled />
+              <Input readOnly />
             </Form.Item>
           </Col>
           

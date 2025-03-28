@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { Table, Card, Input, Button, Typography, Space, message, Tag, Modal, Form, DatePicker, Statistic, Row, Col, Tooltip, Divider, Progress } from 'antd'
 import { 
   SearchOutlined,
@@ -9,13 +9,22 @@ import {
   RollbackOutlined,
   ClockCircleOutlined
 } from '@ant-design/icons'
-import { customerApi } from '../../services/api'
+import { customerApi, dataCacheService } from '../../services/api'
 import { Customer } from '../../types'
 import dayjs from 'dayjs'
 import * as XLSX from 'xlsx'
 import { useAuth } from '../../contexts/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../services/supabaseClient'
+import { calculateAllFields } from '../../utils/calculationUtils'
+
+/**
+ * 性能优化说明：
+ * 1. 使用局部状态更新代替全量数据获取，减少不必要的重渲染
+ * 2. 搜索功能添加防抖，减少频繁过滤导致的性能问题
+ * 3. 优化统计数据更新逻辑，避免全量重新计算
+ * 4. 添加性能监控点，便于追踪耗时操作
+ */
 
 // 更新出库状态类型定义
 type OutboundStatus = 'none' | 'outbound' | 'inbound' | 'returned';
@@ -58,48 +67,87 @@ const WarehouseManagerDashboard = () => {
     drawingChangeCount: 0
   })
 
+  // 添加防抖搜索
+  const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+  
+  // 使用useCallback封装搜索逻辑
+  const handleSearch = useCallback((value: string) => {
+    // 设置搜索文本
+    setSearchText(value);
+    
+    // 如果已经有一个定时器在运行，清除它
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+    }
+    
+    // 设置新的定时器
+    debounceTimer.current = setTimeout(() => {
+      const lowercasedFilter = value.toLowerCase();
+      
+      // 性能监控 - 开始过滤
+      console.time('搜索过滤');
+      
+      const filtered = customers.filter(item => {
+        return (
+          (item.customer_name && item.customer_name.toLowerCase().includes(lowercasedFilter)) ||
+          (item.phone && item.phone.toLowerCase().includes(lowercasedFilter)) ||
+          (item.address && item.address.toLowerCase().includes(lowercasedFilter)) ||
+          (item.salesman && item.salesman.toLowerCase().includes(lowercasedFilter)) ||
+          (item.construction_team && item.construction_team.toLowerCase().includes(lowercasedFilter))
+        );
+      });
+      
+      setFilteredCustomers(filtered);
+      
+      // 性能监控 - 结束过滤
+      console.timeEnd('搜索过滤');
+    }, 300); // 300ms防抖延迟
+  }, [customers]);
+  
+  // 清除防抖定时器
+  useEffect(() => {
+    return () => {
+      if (debounceTimer.current) {
+        clearTimeout(debounceTimer.current);
+      }
+    };
+  }, []);
+
+  // 初次加载时执行一次过滤
+  useEffect(() => {
+    handleSearch(searchText);
+  }, [customers, handleSearch, searchText]);
+
   // 获取仓库的客户数据
   useEffect(() => {
     fetchCustomers()
     fetchSalesmenInfo() // 获取业务员信息
   }, [])
 
-  // 搜索过滤
-  useEffect(() => {
-    const lowercasedFilter = searchText.toLowerCase()
-    const filtered = customers.filter(item => {
-      return (
-        (item.customer_name && item.customer_name.toLowerCase().includes(lowercasedFilter)) ||
-        (item.phone && item.phone.toLowerCase().includes(lowercasedFilter)) ||
-        (item.address && item.address.toLowerCase().includes(lowercasedFilter)) ||
-        (item.salesman && item.salesman.toLowerCase().includes(lowercasedFilter)) ||
-        (item.construction_team && item.construction_team.toLowerCase().includes(lowercasedFilter))
-      )
-    })
-    setFilteredCustomers(filtered)
-  }, [customers, searchText])
-
   // 获取客户数据
   const fetchCustomers = async () => {
     setLoading(true)
     try {
+      // 添加性能提示 - 开始获取数据
+      console.time('获取客户数据');
+      
       const data = await customerApi.getAll()
+      
+      // 添加性能提示 - 数据获取完成
+      console.timeEnd('获取客户数据');
+      console.time('数据处理和渲染');
+      
+      // 初始化数据缓存服务
+      dataCacheService.initCache(data);
+      
+      // 更新统计数据
+      updateStats(data);
+      
+      // 批量更新UI状态，减少渲染次数
       setCustomers(data)
       
-      // 计算统计数据
-      const totalCustomers = data.length
-      const outboundCustomers = data.filter(c => c.component_outbound_date || c.square_steel_outbound_date).length
-      const pendingOutbound = data.filter(c => !c.component_outbound_date && !c.square_steel_outbound_date).length
-      const urgeOrderCount = data.filter(c => c.urge_order).length
-      const drawingChangeCount = data.filter(c => c.drawing_change).length
-      
-      setStats({
-        totalCustomers,
-        outboundCustomers,
-        pendingOutbound,
-        urgeOrderCount,
-        drawingChangeCount
-      })
+      // 添加性能提示 - 数据处理完成
+      console.timeEnd('数据处理和渲染');
       
       setLoading(false)
     } catch (error) {
@@ -163,6 +211,23 @@ const WarehouseManagerDashboard = () => {
     return email;
   };
 
+  // 添加更新统计数据的函数
+  const updateStats = (data: Customer[]) => {
+    const totalCustomers = data.length;
+    const outboundCustomers = data.filter(c => c.component_outbound_date || c.square_steel_outbound_date).length;
+    const pendingOutbound = data.filter(c => !c.component_outbound_date && !c.square_steel_outbound_date).length;
+    const urgeOrderCount = data.filter(c => c.urge_order).length;
+    const drawingChangeCount = data.filter(c => c.drawing_change).length;
+    
+    setStats({
+      totalCustomers,
+      outboundCustomers,
+      pendingOutbound,
+      urgeOrderCount,
+      drawingChangeCount
+    });
+  };
+
   // 处理出库状态变更
   const handleOutboundStatusChange = async (id: string | undefined, type: 'square_steel' | 'component', status: OutboundStatus) => {
     if (!id) {
@@ -207,11 +272,37 @@ const WarehouseManagerDashboard = () => {
           break;
       }
 
-      // 先更新UI状态
-      setCustomers(prev => prev.map(c => c.id === id ? { ...c, ...updateData } : c));
-
-      // 调用API更新
-      await customerApi.update(id, updateData);
+      // 使用缓存更新服务立即更新本地状态
+      customerApi.updateWithCache(id, updateData);
+      
+      // 使用局部更新而不是获取所有客户数据
+      setCustomers(prevCustomers => 
+        prevCustomers.map(c => c.id === id ? { ...c, ...updateData } : c)
+      );
+      
+      // 同样局部更新过滤后的列表
+      setFilteredCustomers(prevFiltered => 
+        prevFiltered.map(c => c.id === id ? { ...c, ...updateData } : c)
+      );
+      
+      // 局部更新统计数据
+      const isOutboundStatusChange = 
+        (type === 'component' && !customer.component_outbound_date && status === 'outbound') ||
+        (type === 'component' && customer.component_outbound_date && status === 'none') ||
+        (type === 'square_steel' && !customer.square_steel_outbound_date && status === 'outbound') ||
+        (type === 'square_steel' && customer.square_steel_outbound_date && status === 'none');
+        
+      if (isOutboundStatusChange) {
+        setStats(prev => {
+          const outboundChange = status === 'outbound' ? 1 : -1;
+          
+          return {
+            ...prev,
+            outboundCustomers: prev.outboundCustomers + outboundChange,
+            pendingOutbound: prev.pendingOutbound - outboundChange
+          };
+        });
+      }
       
       // 提示成功
       let actionText = '';
@@ -232,8 +323,6 @@ const WarehouseManagerDashboard = () => {
       
       message.success(`${customer.customer_name} ${type === 'square_steel' ? '方钢' : '组件'}${actionText}`);
       
-      // 刷新数据以更新统计信息
-      fetchCustomers();
     } catch (error) {
       console.error('更新出库状态失败:', error);
       message.error('更新出库状态失败');
@@ -263,16 +352,21 @@ const WarehouseManagerDashboard = () => {
         [`${itemType}_outbound_date`]: currentDate ? null : dayjs().format('YYYY-MM-DD')
       };
       
-      // 先更新UI状态
-      setCustomers(prev => prev.map(c => c.id === id ? { ...c, ...updateObj } : c));
+      // 使用缓存更新服务立即更新本地状态
+      customerApi.updateWithCache(id, updateObj);
       
-      // 调用API更新
-      await customerApi.update(id, updateObj);
+      // 使用局部更新而不是获取所有客户数据
+      setCustomers(prevCustomers => 
+        prevCustomers.map(c => c.id === id ? { ...c, ...updateObj } : c)
+      );
+      
+      // 同样局部更新过滤后的列表
+      setFilteredCustomers(prevFiltered => 
+        prevFiltered.map(c => c.id === id ? { ...c, ...updateObj } : c)
+      );
       
       message.success(currentDate ? `${customer.customer_name} ${itemType}已取消出库` : `${customer.customer_name} ${itemType}已标记为出库`);
       
-      // 刷新数据以更新统计信息
-      fetchCustomers();
     } catch (error) {
       console.error('更新出库状态失败:', error);
       message.error('更新出库状态失败');
@@ -313,18 +407,92 @@ const WarehouseManagerDashboard = () => {
         return
       }
       
+      // 根据组件数量自动计算其他字段
+      const moduleCount = parseInt(values.module_count);
+      let formattedValues = { ...values };
+      
+      if (!isNaN(moduleCount) && moduleCount >= 0) {
+        // 如果组件数量有效，计算相关字段
+        const calculatedFields = calculateAllFields(moduleCount);
+        
+        // 只有当组件数量大于等于10时才更新字段
+        if (moduleCount >= 10) {
+          // 只有在表单中未手动修改这些字段的情况下才使用计算值
+          if (!values.inverter || values.inverter === currentCustomer.inverter) {
+            formattedValues.inverter = calculatedFields.inverter || '';
+          }
+          
+          if (!values.distribution_box || values.distribution_box === currentCustomer.distribution_box) {
+            formattedValues.distribution_box = calculatedFields.distribution_box || '';
+          }
+          
+          if (!values.copper_wire || values.copper_wire === currentCustomer.copper_wire) {
+            formattedValues.copper_wire = calculatedFields.copper_wire || '';
+          }
+          
+          if (!values.aluminum_wire || values.aluminum_wire === currentCustomer.aluminum_wire) {
+            formattedValues.aluminum_wire = calculatedFields.aluminum_wire || '';
+          }
+        }
+      }
+      
       // 转换日期
-      const formattedValues = {
-        ...values,
+      formattedValues = {
+        ...formattedValues,
         square_steel_outbound_date: values.square_steel_outbound_date ? values.square_steel_outbound_date.format('YYYY-MM-DD') : null,
         component_outbound_date: values.component_outbound_date ? values.component_outbound_date.format('YYYY-MM-DD') : null,
       }
       
-      await customerApi.update(currentCustomer.id, formattedValues)
+      // 使用缓存更新服务立即更新本地状态
+      customerApi.updateWithCache(currentCustomer.id, formattedValues);
+      
+      // 使用局部更新而不是获取所有客户数据
+      setCustomers(prevCustomers => 
+        prevCustomers.map(c => c.id === currentCustomer.id ? { ...c, ...formattedValues } : c)
+      );
+      
+      // 同样局部更新过滤后的列表
+      setFilteredCustomers(prevFiltered => 
+        prevFiltered.map(c => c.id === currentCustomer.id ? { ...c, ...formattedValues } : c)
+      );
+      
+      // 检查是否需要更新统计数据（仅在出库状态发生变化时）
+      const isComponentStatusChange = 
+        (!currentCustomer.component_outbound_date && formattedValues.component_outbound_date) || 
+        (currentCustomer.component_outbound_date && !formattedValues.component_outbound_date);
+        
+      const isSquareSteelStatusChange = 
+        (!currentCustomer.square_steel_outbound_date && formattedValues.square_steel_outbound_date) || 
+        (currentCustomer.square_steel_outbound_date && !formattedValues.square_steel_outbound_date);
+        
+      if (isComponentStatusChange || isSquareSteelStatusChange) {
+        // 计算出库状态变化
+        let outboundChange = 0;
+        
+        // 如果之前没有任何出库但现在有一项出库了
+        const wasOutbound = currentCustomer.component_outbound_date || currentCustomer.square_steel_outbound_date;
+        const isOutbound = formattedValues.component_outbound_date || formattedValues.square_steel_outbound_date;
+        
+        if (!wasOutbound && isOutbound) {
+          outboundChange = 1;
+        } 
+        // 如果之前有出库但现在都没有了
+        else if (wasOutbound && !isOutbound) {
+          outboundChange = -1;
+        }
+        
+        if (outboundChange !== 0) {
+          setStats(prev => ({
+            ...prev,
+            outboundCustomers: prev.outboundCustomers + outboundChange,
+            pendingOutbound: prev.pendingOutbound - outboundChange
+          }));
+        }
+      }
       
       message.success('出库信息更新成功')
       setOutboundModalVisible(false)
-      fetchCustomers()
+      
     } catch (error) {
       console.error('更新出库信息失败:', error)
       message.error('更新出库信息失败')
@@ -496,12 +664,15 @@ const WarehouseManagerDashboard = () => {
       render: (text: string, record: Customer) => {
         // 如果组件数量过少，无法确定逆变器型号
         if (!record.module_count || record.module_count < 10) {
-          return <span style={{ color: '#999', fontStyle: 'italic' }}>无法确定型号</span>;
+          return <span style={{ color: '#999' }}>-</span>;
         }
 
         // 检查是否有出库日期（时间戳）
         const outboundDate = (record as any).inverter_outbound_date ? 
           dayjs((record as any).inverter_outbound_date).format('YYYY-MM-DD') : '';
+        
+        // 如果text为空，根据组件数量计算正确的逆变器型号
+        const calculatedInverter = text || (record.module_count ? calculateAllFields(record.module_count).inverter : '');
         
         return (
           <Tooltip title={outboundDate ? `出库时间: ${outboundDate}` : "点击可记录出库"}>
@@ -510,7 +681,7 @@ const WarehouseManagerDashboard = () => {
               style={{ cursor: 'pointer' }}
               onClick={() => handleItemOutboundToggle(record.id, 'inverter', (record as any).inverter_outbound_date)}
             >
-              {text || 'SN60PT'}
+              {calculatedInverter}
             </Tag>
           </Tooltip>
         );
@@ -524,9 +695,17 @@ const WarehouseManagerDashboard = () => {
       width: 100,
       ellipsis: true,
       render: (text: string, record: Customer) => {
+        // 如果组件数量过少，无法确定型号
+        if (!record.module_count || record.module_count < 10) {
+          return <span style={{ color: '#999' }}>-</span>;
+        }
+        
         // 检查是否有出库日期（时间戳）
         const outboundDate = (record as any).distribution_box_outbound_date ? 
           dayjs((record as any).distribution_box_outbound_date).format('YYYY-MM-DD') : '';
+        
+        // 如果text为空，根据组件数量计算正确的配电箱规格
+        const calculatedBox = text || (record.module_count ? calculateAllFields(record.module_count).distribution_box : '');
         
         return (
           <Tooltip title={outboundDate ? `出库时间: ${outboundDate}` : "点击可记录出库"}>
@@ -535,7 +714,7 @@ const WarehouseManagerDashboard = () => {
               style={{ cursor: 'pointer' }}
               onClick={() => handleItemOutboundToggle(record.id, 'distribution_box', (record as any).distribution_box_outbound_date)}
             >
-              {text || '80kWp'}
+              {calculatedBox}
             </Tag>
           </Tooltip>
         );
@@ -549,9 +728,17 @@ const WarehouseManagerDashboard = () => {
       width: 100,
       ellipsis: true,
       render: (text: string, record: Customer) => {
+        // 如果组件数量过少，无法确定型号
+        if (!record.module_count || record.module_count < 10) {
+          return <span style={{ color: '#999' }}>-</span>;
+        }
+        
         // 检查是否有出库日期（时间戳）
         const outboundDate = (record as any).copper_wire_outbound_date ? 
           dayjs((record as any).copper_wire_outbound_date).format('YYYY-MM-DD') : '';
+        
+        // 如果text为空，根据组件数量计算正确的铜线规格
+        const calculatedWire = text || (record.module_count ? calculateAllFields(record.module_count).copper_wire : '');
         
         return (
           <Tooltip title={outboundDate ? `出库时间: ${outboundDate}` : "点击可记录出库"}>
@@ -560,7 +747,7 @@ const WarehouseManagerDashboard = () => {
               style={{ cursor: 'pointer' }}
               onClick={() => handleItemOutboundToggle(record.id, 'copper_wire', (record as any).copper_wire_outbound_date)}
             >
-              {text || '3*35mm²'}
+              {calculatedWire}
             </Tag>
           </Tooltip>
         );
@@ -574,9 +761,17 @@ const WarehouseManagerDashboard = () => {
       width: 100,
       ellipsis: true,
       render: (text: string, record: Customer) => {
+        // 如果组件数量过少，无法确定型号
+        if (!record.module_count || record.module_count < 10) {
+          return <span style={{ color: '#999' }}>-</span>;
+        }
+        
         // 检查是否有出库日期（时间戳）
         const outboundDate = (record as any).aluminum_wire_outbound_date ? 
           dayjs((record as any).aluminum_wire_outbound_date).format('YYYY-MM-DD') : '';
+        
+        // 如果text为空，根据组件数量计算正确的铝线规格
+        const calculatedWire = text || (record.module_count ? calculateAllFields(record.module_count).aluminum_wire : '');
         
         return (
           <Tooltip title={outboundDate ? `出库时间: ${outboundDate}` : "点击可记录出库"}>
@@ -585,7 +780,7 @@ const WarehouseManagerDashboard = () => {
               style={{ cursor: 'pointer' }}
               onClick={() => handleItemOutboundToggle(record.id, 'aluminum_wire', (record as any).aluminum_wire_outbound_date)}
             >
-              {text || '3*50mm²'}
+              {calculatedWire}
             </Tag>
           </Tooltip>
         );
@@ -839,7 +1034,7 @@ const WarehouseManagerDashboard = () => {
           <Input
             placeholder="搜索客户姓名/电话/地址"
             value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
+            onChange={(e) => handleSearch(e.target.value)}
             style={{ width: 250 }}
             prefix={<SearchOutlined />}
             allowClear
@@ -992,7 +1187,26 @@ const WarehouseManagerDashboard = () => {
                 name="module_count"
                 label="组件数量"
               >
-                <Input type="number" min={0} />
+                <Input 
+                  type="number" 
+                  min={0} 
+                  onChange={(e) => {
+                    const moduleCount = parseInt(e.target.value);
+                    if (!isNaN(moduleCount) && moduleCount >= 0) {
+                      const calculatedFields = calculateAllFields(moduleCount);
+                      
+                      // 只有当组件数量大于等于10时才更新字段，否则保留原值
+                      if (moduleCount >= 10) {
+                        form.setFieldsValue({
+                          inverter: calculatedFields.inverter || '',
+                          distribution_box: calculatedFields.distribution_box || '',
+                          copper_wire: calculatedFields.copper_wire || '',
+                          aluminum_wire: calculatedFields.aluminum_wire || ''
+                        });
+                      }
+                    }
+                  }}
+                />
               </Form.Item>
             </Col>
             <Col span={12}>

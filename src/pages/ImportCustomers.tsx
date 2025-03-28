@@ -7,20 +7,21 @@ import {
   Table, 
   Typography, 
   Space, 
-  Spin 
+  Spin,
+  Tag,
+  Alert,
+  Tooltip
 } from 'antd';
-import { UploadOutlined, DownloadOutlined, ImportOutlined } from '@ant-design/icons';
+import { UploadOutlined, DownloadOutlined, ImportOutlined, FileExcelOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 import { InboxOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import { supabase } from '../services/supabase';
 import { useNavigate } from 'react-router-dom';
 import { constructionTeamApi } from '../services/api';
+import dayjs from 'dayjs';
 
-const { Title, Text } = Typography;
+const { Title, Text, Paragraph } = Typography;
 const { Dragger } = Upload;
-
-// 查找导入模板相关代码，修改导入字段定义
-// ... existing code ...
 
 // 更新导入模板的字段定义
 const IMPORT_TEMPLATE_FIELDS = [
@@ -39,9 +40,7 @@ const IMPORT_TEMPLATE_FIELDS = [
   { key: 'company', label: '公司', required: false }
 ];
 
-// ... existing code ...
-
-// 修改downloadTemplate函数
+// 下载导入模板
 const downloadTemplate = () => {
   // 创建表头行
   const headerRow = IMPORT_TEMPLATE_FIELDS.map(field => field.label);
@@ -74,9 +73,7 @@ const downloadTemplate = () => {
   XLSX.writeFile(wb, "客户导入模板.xlsx");
 };
 
-// ... existing code ...
-
-// 修改handleImport函数，只验证客户姓名是否存在
+// 验证行数据
 const validateRow = (row: any) => {
   const errors = [];
   
@@ -85,8 +82,9 @@ const validateRow = (row: any) => {
     errors.push('客户姓名不能为空');
   }
   
-  if (!row.phone) {
-    errors.push('客户电话不能为空');
+  // 电话不是必填，但如果填了且不为空，检查格式
+  if (row.phone && row.phone.toString().trim() !== '' && !/^1[3-9]\d{9}$/.test(row.phone)) {
+    errors.push('电话号码格式不正确');
   }
   
   // 验证company字段值是否有效
@@ -97,7 +95,50 @@ const validateRow = (row: any) => {
   return errors;
 };
 
-// ... existing code ...
+// 导入状态卡片组件
+const ImportStatusCard = ({ status, isValidating }: { 
+  status: { total: number; valid: number; invalid: number } | null;
+  isValidating: boolean;
+}) => {
+  if (!status && !isValidating) return null;
+  
+  return (
+    <Card title={<span><Text strong>导入验证状态</Text> {isValidating && <Spin size="small" />}</span>} bordered={false} style={{ marginBottom: '24px' }}>
+      {isValidating ? (
+        <div style={{ textAlign: 'center', padding: '20px 0' }}>
+          <Spin tip="正在验证导入数据，请稍候..." />
+        </div>
+      ) : status && (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'space-around' }}>
+            <div>
+              <Text strong>总数据：</Text>
+              <Text>{status.total}</Text>
+            </div>
+            <div>
+              <Text strong>验证通过：</Text>
+              <Text type="success">{status.valid}</Text>
+            </div>
+            <div>
+              <Text strong>验证未通过：</Text>
+              <Text type="danger">{status.invalid}</Text>
+            </div>
+          </div>
+          
+          {status.invalid > 0 ? (
+            <div style={{ marginTop: '16px', textAlign: 'center' }}>
+              <Text type="warning">共有 {status.invalid} 条数据验证未通过，请修正后重新导入</Text>
+            </div>
+          ) : (
+            <div style={{ marginTop: '16px', textAlign: 'center' }}>
+              <Text type="success">所有数据验证通过，可以进行导入</Text>
+            </div>
+          )}
+        </>
+      )}
+    </Card>
+  );
+};
 
 const ImportCustomers = () => {
   const navigate = useNavigate();
@@ -111,6 +152,12 @@ const ImportCustomers = () => {
     failed: number;
     failedItems: any[];
   } | null>(null);
+  // 添加验证状态
+  const [validationStatus, setValidationStatus] = useState<{
+    total: number;
+    valid: number;
+    invalid: number;
+  } | null>(null);
   // 添加业务员缓存状态
   const [salesmenCache, setSalesmenCache] = useState<Map<string, string>>(new Map());
   // 添加施工队缓存状态
@@ -122,6 +169,7 @@ const ImportCustomers = () => {
     '客户姓名': 'customer_name',
     '客户电话': 'phone',
     '客户地址': 'address',
+    '地址': 'address',
     '身份证号': 'id_card',
     '业务员': 'salesman',
     '备案日期': 'filing_date',
@@ -248,33 +296,45 @@ const ImportCustomers = () => {
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: 'array' });
         
-        // 获取第一个工作表
+        if (workbook.SheetNames.length === 0) {
+          throw new Error('Excel文件中没有工作表');
+        }
+        
         const firstSheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheetName];
         
-        // 将工作表转换为JSON
-        const json = XLSX.utils.sheet_to_json(worksheet);
+        // 转换为JSON数据
+        const jsonData = XLSX.utils.sheet_to_json(worksheet);
         
-        if (json.length === 0) {
-          message.error('文件内容为空');
+        if (jsonData.length === 0) {
           setIsValidating(false);
+          message.error('没有找到有效数据，请确保Excel文件包含有效内容');
           return;
         }
-
-        // 映射字段名称
-        const mappedData = json.map((row: any, index) => {
-          const mappedRow: any = { row_index: index + 2 }; // Excel从1开始，标题行是1，数据从2开始
+        
+        console.log('导入的原始数据:', jsonData);
+        
+        // 转换字段名称
+        const mappedData = jsonData.map((row: any, index) => {
+          const mappedRow: any = { row_index: index + 2 }; // Excel从1开始，标题行占1行
           
+          // 遍历每个字段，进行映射
           Object.keys(row).forEach(key => {
-            const dbField = FIELD_MAPPING[key as keyof typeof FIELD_MAPPING];
-            if (dbField) {
-              mappedRow[dbField] = row[key];
+            const mappedKey = FIELD_MAPPING[key];
+            if (mappedKey) {
+              mappedRow[mappedKey] = row[key];
+            } else {
+              // 如果没有映射关系，保留原字段名
+              mappedRow[key] = row[key];
             }
           });
           
           return mappedRow;
         });
         
+        console.log('映射后的数据:', mappedData);
+        
+        // 设置导入数据并开始验证
         setImportData(mappedData);
         validateData(mappedData);
       } catch (error) {
@@ -291,19 +351,29 @@ const ImportCustomers = () => {
   // 验证数据
   const validateData = (data: any[]) => {
     const errors: { [key: string]: string[] } = {};
+    let validCount = 0;
+    let invalidCount = 0;
     
     data.forEach((row, index) => {
       const rowErrors = validateRow(row);
       if (rowErrors.length > 0) {
         errors[index] = rowErrors;
+        invalidCount++;
+      } else {
+        validCount++;
       }
     });
     
     setValidationErrors(errors);
+    setValidationStatus({
+      total: data.length,
+      valid: validCount,
+      invalid: invalidCount
+    });
     setIsValidating(false);
     
     if (Object.keys(errors).length > 0) {
-      message.warning('部分数据验证未通过，请修正后重新导入');
+      message.warning(`部分数据验证未通过: ${invalidCount}条异常，${validCount}条正常，请修正后重新导入`);
     } else {
       message.success('数据验证通过，可以导入');
     }
@@ -340,13 +410,23 @@ const ImportCustomers = () => {
           customerData.register_date = new Date(customerData.register_date).toISOString();
         }
         
+        // 备案日期可以是日期或文字
         if (customerData.filing_date) {
-          customerData.filing_date = new Date(customerData.filing_date).toISOString();
+          // 尝试转换为日期
+          const filingDate = new Date(customerData.filing_date);
+          if (!isNaN(filingDate.getTime())) {
+            // 如果是有效日期则转换
+            customerData.filing_date = filingDate.toISOString();
+          }
+          // 如果不是有效日期，保持原文字格式
         }
         
         // 转换数字字段
         if (customerData.module_count) {
           customerData.module_count = Number(customerData.module_count);
+        } else {
+          // 如果组件数量为空，明确设置为null
+          customerData.module_count = null;
         }
         
         if (customerData.price) {
@@ -422,7 +502,31 @@ const ImportCustomers = () => {
     beforeUpload: parseExcel,
   };
 
-  // 表格列定义
+  // 添加导出失败数据功能
+  const exportFailedData = (failedItems: any[]) => {
+    // 创建工作簿
+    const wb = XLSX.utils.book_new();
+    
+    // 准备导出数据
+    const exportData = failedItems.map(item => {
+      const { error, row_index, ...rest } = item;
+      return {
+        ...rest,
+        '失败原因': error
+      };
+    });
+    
+    // 创建工作表
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    
+    // 添加工作表到工作簿
+    XLSX.utils.book_append_sheet(wb, ws, "导入失败数据");
+    
+    // 下载文件
+    XLSX.writeFile(wb, `导入失败数据_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.xlsx`);
+  };
+
+  // 修改表格列定义
   const columns = [
     {
       title: '行号',
@@ -434,11 +538,31 @@ const ImportCustomers = () => {
       title: '客户姓名',
       dataIndex: 'customer_name',
       key: 'customer_name',
+      render: (text: string, record: any, index: number) => {
+        const hasError = validationErrors[index]?.some(err => err.includes('客户姓名'));
+        return (
+          <Tooltip title={hasError ? validationErrors[index].find(err => err.includes('客户姓名')) : null}>
+            <Text type={hasError ? 'danger' : undefined}>
+              {text || ''} {hasError && <ExclamationCircleOutlined style={{ marginLeft: 4 }} />}
+            </Text>
+          </Tooltip>
+        );
+      }
     },
     {
       title: '客户电话',
       dataIndex: 'phone',
       key: 'phone',
+      render: (text: string, record: any, index: number) => {
+        const hasError = validationErrors[index]?.some(err => err.includes('电话'));
+        return (
+          <Tooltip title={hasError ? validationErrors[index].find(err => err.includes('电话')) : null}>
+            <Text type={hasError ? 'danger' : undefined}>
+              {text || ''} {hasError && <ExclamationCircleOutlined style={{ marginLeft: 4 }} />}
+            </Text>
+          </Tooltip>
+        );
+      }
     },
     {
       title: '客户地址',
@@ -469,7 +593,16 @@ const ImportCustomers = () => {
       title: '公司',
       dataIndex: 'company',
       key: 'company',
-      render: (text: string) => text || '',
+      render: (text: string, record: any, index: number) => {
+        const hasError = validationErrors[index]?.some(err => err.includes('公司'));
+        return (
+          <Tooltip title={hasError ? validationErrors[index].find(err => err.includes('公司')) : null}>
+            <Text type={hasError ? 'danger' : undefined}>
+              {text || ''} {hasError && <ExclamationCircleOutlined style={{ marginLeft: 4 }} />}
+            </Text>
+          </Tooltip>
+        );
+      }
     },
     {
       title: '验证结果',
@@ -477,9 +610,12 @@ const ImportCustomers = () => {
       render: (_: any, record: any, index: number) => {
         if (validationErrors[index]) {
           return (
-            <Text type="danger">
-              {validationErrors[index].join('；')}
-            </Text>
+            <Tooltip title={validationErrors[index].join('\n')} placement="left">
+              <Text type="danger">
+                <ExclamationCircleOutlined style={{ marginRight: 8 }} />
+                验证未通过
+              </Text>
+            </Tooltip>
           );
         }
         return <Text type="success">验证通过</Text>;
@@ -514,7 +650,7 @@ const ImportCustomers = () => {
       </Card>
       
       <Card style={{ marginBottom: '24px' }}>
-        <Dragger {...uploadProps}>
+        <Dragger {...uploadProps} disabled={isImporting}>
           <p className="ant-upload-drag-icon">
             <InboxOutlined />
           </p>
@@ -525,24 +661,41 @@ const ImportCustomers = () => {
         </Dragger>
       </Card>
       
-      {isValidating && (
-        <div style={{ textAlign: 'center', margin: '20px 0' }}>
-          <Spin tip="数据验证中..." />
-        </div>
-      )}
+      {/* 使用新的状态卡片组件 */}
+      <ImportStatusCard status={validationStatus} isValidating={isValidating} />
       
       {importData.length > 0 && !isValidating && (
         <>
-          <Card title="数据预览" style={{ marginBottom: '24px' }}>
-            <Table 
-              dataSource={importData} 
-              columns={columns} 
-              rowKey="row_index"
-              pagination={false}
-              scroll={{ x: '3000px' }}
-              className="warehouse-table"
-            />
-          </Card>
+          {validationStatus && validationStatus.invalid > 0 ? (
+            <Card title="验证未通过数据" style={{ marginBottom: '24px' }}>
+              <Alert
+                message="请修正以下验证未通过的数据"
+                description="以下数据存在验证问题，请修正后重新导入。只显示验证未通过的数据。"
+                type="warning"
+                showIcon
+                style={{ marginBottom: 16 }}
+              />
+              <Table 
+                dataSource={importData.filter((_, index) => validationErrors[index])} 
+                columns={columns} 
+                rowKey="row_index"
+                pagination={{ pageSize: 10 }}
+                scroll={{ x: '3000px' }}
+                className="warehouse-table"
+                rowClassName={() => 'validation-error-row'}
+              />
+            </Card>
+          ) : (
+            <Card title="数据预览" style={{ marginBottom: '24px' }}>
+              <Alert
+                message="所有数据验证通过"
+                description={`共${importData.length}条数据全部验证通过，可以进行导入。`}
+                type="success"
+                showIcon
+                style={{ marginBottom: 16 }}
+              />
+            </Card>
+          )}
           
           <Card>
             <Space>
@@ -559,6 +712,7 @@ const ImportCustomers = () => {
               <Button onClick={() => {
                 setImportData([]);
                 setValidationErrors({});
+                setValidationStatus(null);
                 setImportResult(null);
               }}>
                 清空数据
@@ -568,31 +722,54 @@ const ImportCustomers = () => {
         </>
       )}
       
+      {/* 修改导入结果显示部分 */}
       {importResult && (
-        <Card title="导入结果" style={{ marginTop: '24px' }}>
-          <div>
-            <p>总数据: {importResult.total}</p>
-            <p>成功导入: {importResult.success}</p>
-            <p>导入失败: {importResult.failed}</p>
+        <Card 
+          title={
+            <span>
+              <Text strong>导入结果</Text> 
+              {importResult.failed > 0 ? 
+                <Tag color="error" style={{ marginLeft: 8 }}>部分失败</Tag> : 
+                <Tag color="success" style={{ marginLeft: 8 }}>全部成功</Tag>
+              }
+            </span>
+          } 
+          style={{ marginTop: '24px' }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-around', marginBottom: '20px' }}>
+            <div>
+              <Text strong>总数据：</Text>
+              <Text>{importResult.total}</Text>
+            </div>
+            <div>
+              <Text strong>成功导入：</Text>
+              <Text type="success">{importResult.success}</Text>
+            </div>
+            <div>
+              <Text strong>导入失败：</Text>
+              <Text type="danger">{importResult.failed}</Text>
+            </div>
           </div>
           
           {importResult.failedItems.length > 0 && (
             <>
-              <Title level={4}>失败数据详情</Title>
-              <Table 
-                dataSource={importResult.failedItems} 
-                columns={[
-                  ...columns.filter(col => col.key !== 'validation'),
-                  {
-                    title: '错误信息',
-                    dataIndex: 'error',
-                    key: 'error',
-                  },
-                ]}
-                rowKey="row_index"
-                pagination={false}
-                scroll={{ x: '3000px' }}
-                className="warehouse-table"
+              <Alert
+                message="导入失败数据"
+                description={
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Text>共{importResult.failed}条数据导入失败，请导出失败数据查看具体原因</Text>
+                    <Button 
+                      type="primary" 
+                      icon={<DownloadOutlined />}
+                      onClick={() => exportFailedData(importResult.failedItems)}
+                    >
+                      导出失败数据
+                    </Button>
+                  </Space>
+                }
+                type="error"
+                showIcon
+                style={{ marginBottom: 16 }}
               />
             </>
           )}

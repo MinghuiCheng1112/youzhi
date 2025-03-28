@@ -377,6 +377,12 @@ const ConstructionTeamDashboard = () => {
         if (result.blockedSalesmen && Array.isArray(result.blockedSalesmen) && result.blockedSalesmen.length > 0) {
           setBlockedSalesmen(result.blockedSalesmen);
           console.log('从验证码获取到屏蔽业务员列表:', result.blockedSalesmen);
+          // 在console中显示屏蔽的业务员
+          console.log('已屏蔽业务员:', result.blockedSalesmen.join('、'));
+          // 在用户界面提示已屏蔽的业务员
+          if (result.blockedSalesmen.length > 0) {
+            message.info(`当前验证码包含${result.blockedSalesmen.length}个被屏蔽的业务员，其客户将不会出现在抽签列表中`);
+          }
         }
         
         return true;
@@ -445,6 +451,11 @@ const ConstructionTeamDashboard = () => {
             // 更新屏蔽业务员列表
             if (result.blockedSalesmen && Array.isArray(result.blockedSalesmen) && result.blockedSalesmen.length > 0) {
               setBlockedSalesmen(result.blockedSalesmen);
+              console.log('自动验证时从验证码获取到屏蔽业务员列表:', result.blockedSalesmen);
+              // 在用户界面提示已屏蔽的业务员
+              if (result.blockedSalesmen.length > 0) {
+                message.info(`当前验证码屏蔽了${result.blockedSalesmen.length}个业务员的客户`);
+              }
             }
           } else {
             // 验证码无效，只显示一次错误信息
@@ -487,20 +498,43 @@ const ConstructionTeamDashboard = () => {
           console.log('客户数据示例:', validCustomers[0]);
         }
         
+        // 获取最新的屏蔽业务员列表（来自验证码或localStorage）
+        // 这确保我们使用最新的屏蔽列表
+        let currentBlockedSalesmen = [...blockedSalesmen]; // 使用当前状态的复制
+        console.log('当前屏蔽业务员列表:', currentBlockedSalesmen);
+        
         // 筛选未分配施工队且有方钢出库日期的客户
         let availableCustomers = validCustomers.filter(customer => {
+          // 1. 施工队字段为空
           const hasNoConstructionTeam = !customer.construction_team;
-          const hasSquareSteelOutbound = !!customer.square_steel_outbound_date;
-          // 检查客户业务员是否在屏蔽列表中
-          const isSalesmanBlocked = customer.salesman && blockedSalesmen.includes(customer.salesman);
           
-          return hasNoConstructionTeam && hasSquareSteelOutbound && !isSalesmanBlocked;
+          // 2. 方钢出库日期存在
+          const hasSquareSteelOutbound = !!customer.square_steel_outbound_date;
+          
+          // 3. 业务员不在屏蔽列表中
+          const isSalesmanBlocked = customer.salesman && currentBlockedSalesmen.includes(customer.salesman);
+          
+          // 满足所有条件：未分配施工队 + 有方钢出库 + 业务员未被屏蔽
+          const isEligible = hasNoConstructionTeam && hasSquareSteelOutbound && !isSalesmanBlocked;
+          
+          // 调试信息：如果客户被屏蔽，记录原因
+          if (!isEligible && isSalesmanBlocked) {
+            console.log(`客户 ${customer.customer_name} 被屏蔽，业务员: ${customer.salesman}`);
+          }
+          
+          return isEligible;
         });
         
         // 打印屏蔽业务员信息
-        if (blockedSalesmen.length > 0) {
-          console.log('当前屏蔽业务员:', blockedSalesmen);
-          console.log('过滤前客户数:', validCustomers.length, '过滤后客户数:', availableCustomers.length);
+        if (currentBlockedSalesmen.length > 0) {
+          console.log('当前屏蔽业务员:', currentBlockedSalesmen.join('、'));
+          console.log(`过滤前客户数: ${validCustomers.length}, 过滤后客户数: ${availableCustomers.length}`);
+          // 计算因屏蔽业务员而被过滤掉的客户数量
+          const blockedCount = validCustomers.filter(c => 
+            c.salesman && currentBlockedSalesmen.includes(c.salesman) && 
+            !c.construction_team && !!c.square_steel_outbound_date
+          ).length;
+          console.log(`因业务员屏蔽被过滤掉的客户数: ${blockedCount}`);
         }
         
         // 如果选择了乡镇，进一步筛选该乡镇的客户
@@ -537,7 +571,12 @@ const ConstructionTeamDashboard = () => {
             key: customer.id || `${Math.random()}`
           }));
           setDrawableCustomers(customersWithIds);
-          message.success(`找到${customersWithIds.length}个可用客户`);
+          // 显示抽签结果，包括屏蔽信息
+          if (currentBlockedSalesmen.length > 0) {
+            message.success(`找到${customersWithIds.length}个可用客户（已屏蔽${currentBlockedSalesmen.length}个业务员的客户）`);
+          } else {
+            message.success(`找到${customersWithIds.length}个可用客户`);
+          }
         }
       } catch (apiError) {
         console.error('API错误:', apiError);
