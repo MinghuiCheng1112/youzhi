@@ -52,6 +52,9 @@ const CustomerList = () => {
   const [pageSize, setPageSize] = useState<number>(100)
   const [currentPage, setCurrentPage] = useState<number>(1)
   const [totalPages, setTotalPages] = useState<number>(1)
+  // 添加排序相关状态
+  const [sortField, setSortField] = useState<string>('')
+  const [sortOrder, setSortOrder] = useState<'ascend' | 'descend' | undefined>(undefined)
   
   const STATION_MANAGEMENT_OPTIONS = [
     { value: '房产证', label: '房产证', color: 'blue' },
@@ -349,45 +352,41 @@ const CustomerList = () => {
 
   // 优化的搜索函数
   const performSearch = (value: string) => {
-    // 如果搜索为空，直接返回所有数据
-    if (!value.trim()) {
+    const searchText = value.trim().toLowerCase();
+    
+    if (searchText === '') {
+      // 如果搜索文本为空，显示所有客户
       setFilteredCustomers(customers);
+      // 使用排序后的数据计算总页数
       setTotalPages(Math.ceil(customers.length / pageSize));
-      return;
-    }
-
-    // 支持空格或逗号分隔的多关键词搜索
-    const keywords = value.toLowerCase()
-      .split(/[\s,，]+/) // 按空格或中英文逗号分隔
-      .filter(keyword => keyword.trim() !== ''); // 过滤掉空字符串
-    
-    // 使用高效的单次遍历过滤
-    const filtered = customers.filter(customer => {
-      // 只检查最重要的几个字段，减少遍历次数
-      const name = (customer.customer_name || '').toLowerCase();
-      const phone = (customer.phone || '').toLowerCase();
-      const address = (customer.address || '').toLowerCase();
-      const salesman = (customer.salesman || '').toLowerCase();
-      const idCard = (customer.id_card || '').toLowerCase();
-      const meterNumber = (customer.meter_number || '').toLowerCase();
+    } else {
+      // 支持空格或逗号分隔的多关键词搜索
+      const keywords = searchText
+        .split(/[\s,，]+/) // 按空格或中英文逗号分隔
+        .filter(keyword => keyword.trim() !== ''); // 过滤掉空字符串
       
-      // 对每个关键词进行检查，只要有一个关键词匹配任何字段就返回true
-      return keywords.some(keyword => 
-        name.includes(keyword) || 
-        phone.includes(keyword) || 
-        address.includes(keyword) || 
-        salesman.includes(keyword) ||
-        idCard.includes(keyword) ||
-        meterNumber.includes(keyword)
-      );
-    });
-    
-    setFilteredCustomers(filtered);
-    setTotalPages(Math.ceil(filtered.length / pageSize));
-    
-    // 只在真正需要时显示消息，且仅在用户显式触发搜索时（通过handleSearch函数）
-    if (filtered.length === 0 && customers.length > 0 && value.length > 0) {
-      // 消息显示逻辑移至handleSearch函数
+      const filtered = customers.filter(customer => {
+        const name = (customer.customer_name || '').toLowerCase();
+        const phone = (customer.phone || '').toLowerCase();
+        const address = (customer.address || '').toLowerCase();
+        const salesman = (customer.salesman || '').toLowerCase();
+        const idCard = (customer.id_card || '').toLowerCase();
+        const meterNumber = (customer.meter_number || '').toLowerCase();
+        
+        // 对每个关键词进行检查，只要有一个关键词匹配任何字段就返回true
+        return keywords.some(keyword => 
+          name.includes(keyword) || 
+          phone.includes(keyword) || 
+          address.includes(keyword) || 
+          salesman.includes(keyword) ||
+          idCard.includes(keyword) ||
+          meterNumber.includes(keyword)
+        );
+      });
+      
+      setFilteredCustomers(filtered);
+      // 使用排序后的数据计算总页数
+      setTotalPages(Math.ceil(filtered.length / pageSize));
     }
   };
   
@@ -3120,15 +3119,59 @@ const CustomerList = () => {
   const handlePageSizeChange = (size: number) => {
     setPageSize(size);
     setCurrentPage(1); // 重置到第一页
-    setTotalPages(Math.ceil(filteredCustomers.length / size));
+    // 使用排序后的数据计算总页数
+    setTotalPages(Math.ceil(sortedCustomers.length / size));
   }
+  
+  // 计算排序后的数据
+  const sortedCustomers = useMemo(() => {
+    if (!sortField || !sortOrder) {
+      return filteredCustomers;
+    }
+    
+    const sortedData = [...filteredCustomers];
+    const direction = sortOrder === 'ascend' ? 1 : -1;
+    
+    sortedData.sort((a, b) => {
+      const aValue = a[sortField as keyof Customer];
+      const bValue = b[sortField as keyof Customer];
+      
+      if (aValue === undefined || aValue === null) return direction * -1;
+      if (bValue === undefined || bValue === null) return direction;
+      
+      if (typeof aValue === 'string' && typeof bValue === 'string') {
+        return direction * aValue.localeCompare(bValue);
+      } else if (aValue instanceof Date && bValue instanceof Date) {
+        return direction * (aValue.getTime() - bValue.getTime());
+      } else if (typeof aValue === 'number' && typeof bValue === 'number') {
+        return direction * (aValue - bValue);
+      }
+      
+      // 尝试转换为日期
+      if (typeof aValue === 'string' && typeof bValue === 'string') {
+        try {
+          const dateA = new Date(aValue);
+          const dateB = new Date(bValue);
+          if (!isNaN(dateA.getTime()) && !isNaN(dateB.getTime())) {
+            return direction * (dateA.getTime() - dateB.getTime());
+          }
+        } catch (e) {
+          // 如果日期解析失败，继续使用字符串比较
+        }
+      }
+      
+      return direction * String(aValue).localeCompare(String(bValue));
+    });
+    
+    return sortedData;
+  }, [filteredCustomers, sortField, sortOrder]);
   
   // 计算当前页显示的数据
   const paginatedCustomers = useMemo(() => {
     const startIndex = (currentPage - 1) * pageSize;
     const endIndex = startIndex + pageSize;
-    return filteredCustomers.slice(startIndex, endIndex);
-  }, [filteredCustomers, currentPage, pageSize]);
+    return sortedCustomers.slice(startIndex, endIndex);
+  }, [sortedCustomers, currentPage, pageSize]);
 
   // 修改handleSearch函数，用于按钮点击和Enter键触发搜索
   const handleSearch = (value: string) => {
@@ -3486,6 +3529,15 @@ const CustomerList = () => {
             tableLayout="fixed"
             size="middle"
             bordered
+            onChange={(pagination, filters, sorter) => {
+              if (sorter && 'field' in sorter) {
+                setSortField(sorter.field as string);
+                setSortOrder(sorter.order);
+              } else {
+                setSortField('');
+                setSortOrder(undefined);
+              }
+            }}
           />
         </div>
         
