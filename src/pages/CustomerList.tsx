@@ -1961,24 +1961,28 @@ const CustomerList = () => {
       width: 130,
       align: 'center' as const,
       render: (text, record) => {
-        // 如果已上传
+        // 如果已上传国网
         if (text) {
-          // 只有管理员可以将已上传恢复为未上传
-          const canReset = userRole === 'admin';
+          // 管理员或业务员可以编辑上传国网日期
+          const canEdit = ['admin', 'salesman'].includes(userRole || '');
           
           return (
-            <Tooltip title={canReset ? '点击恢复为未上传状态' : '上传时间'}>
+            <Tooltip title={canEdit ? '单击重置状态，双击修改日期' : '上传国网日期'}>
               <Tag 
                 color="green" 
-                style={{ cursor: canReset ? 'pointer' : 'default' }}
-                onClick={() => canReset && record.id && handleUploadToGridChange(record.id)}
+                style={{ cursor: canEdit ? 'pointer' : 'default' }}
+                onClick={() => canEdit && record.id && handleUploadToGridChange(record.id)}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  canEdit && record.id && showUploadToGridDatePicker(record.id);
+                }}
               >
-                <ClockCircleOutlined /> {dayjs(text).format('YYYY-MM-DD HH:mm')}
+                <ClockCircleOutlined /> {dayjs(text).format('YYYY-MM-DD')}
               </Tag>
             </Tooltip>
           );
         } else {
-          // 未上传状态，显示按钮
+          // 未上传国网状态，显示按钮
           return (
             <Button 
               type="primary" 
@@ -1986,7 +1990,7 @@ const CustomerList = () => {
               ghost
               onClick={() => record.id && handleUploadToGridChange(record.id)}
             >
-              上传
+              上传国网
             </Button>
           );
         }
@@ -2000,115 +2004,6 @@ const CustomerList = () => {
       ellipsis: true,
     },
     {
-      title: '建设验收',
-      dataIndex: 'construction_acceptance',
-      key: 'construction_acceptance',
-      width: 130,
-      align: 'center' as const,
-      render: (text, record) => {
-        // 如果已推到
-        if (text) {
-          // 只有管理员可以将已推到恢复为未推到
-          const canReset = userRole === 'admin';
-          
-          // 检查是否是等待状态
-          let isWaiting = false;
-          let displayText = '';
-          
-          // 检查text是否为等待格式："waiting:天数:开始日期"
-          if (typeof text === 'string' && text.startsWith('waiting:')) {
-            isWaiting = true;
-            const parts = text.split(':');
-            if (parts.length === 3) {
-              const initialDays = parseInt(parts[1], 10);
-              const startDate = parts[2];
-              
-              try {
-                // 检查日期有效性
-                if (dayjs(startDate).isValid()) {
-              // 计算从开始日期至今已等待天数
-              const elapsedDays = dayjs().diff(dayjs(startDate), 'day');
-              // 计算当前累计等待天数
-              const totalWaitDays = initialDays + elapsedDays;
-              
-              displayText = `已等待 ${totalWaitDays} 天`;
-                } else {
-                  console.warn(`建设验收等待起始日期无效: ${startDate}`);
-                  displayText = `已等待 ${initialDays} 天`;
-                }
-              } catch (error) {
-                console.error('计算等待天数错误:', error);
-                displayText = `已等待 ${initialDays} 天`;
-              }
-            } else {
-              displayText = '等待中';
-            }
-          } else {
-            // 普通日期显示
-            try {
-              // 检查日期有效性
-              if (dayjs(text).isValid()) {
-            displayText = dayjs(text).format('YYYY-MM-DD HH:mm');
-              } else if (text === true || text === 'true' || text === false || text === 'false') {
-                // 处理布尔值情况
-                displayText = dayjs().format('YYYY-MM-DD HH:mm');
-                console.warn(`建设验收日期字段为布尔值: ${text}，使用当前时间替代`);
-              } else {
-                console.warn(`无效的建设验收日期: ${text}`);
-                displayText = '已验收';
-              }
-            } catch (error) {
-              console.error('建设验收日期格式化错误:', error);
-              displayText = '已验收';
-            }
-          }
-          
-          return (
-            <Tooltip title={canReset ? '点击恢复为未推到状态' : '推到时间/等待状态'}>
-              <Tag 
-                color={isWaiting ? 'orange' : 'green'} 
-                style={{ cursor: canReset ? 'pointer' : 'default' }}
-                onClick={() => canReset && record.id && handleConstructionAcceptanceChange(record.id, text)}
-              >
-                <ClockCircleOutlined /> {displayText}
-              </Tag>
-            </Tooltip>
-          );
-        } else {
-          // 未推到状态，显示按钮
-          return (
-            <Button 
-              type="primary" 
-              size="small"
-              danger
-              ghost
-              onClick={() => record.id && showConstructionAcceptanceOptions(record.id)}
-            >
-              未推到
-            </Button>
-          );
-        }
-      },
-      sorter: (a, b) => {
-        if (!a.construction_acceptance && !b.construction_acceptance) return 0
-        if (!a.construction_acceptance) return -1
-        if (!b.construction_acceptance) return 1
-        
-        try {
-          // 确保日期比较不会因格式无效而崩溃
-          const aTime = dayjs(a.construction_acceptance).isValid() ? 
-            new Date(a.construction_acceptance).getTime() : 0;
-          const bTime = dayjs(b.construction_acceptance).isValid() ? 
-            new Date(b.construction_acceptance).getTime() : 0;
-          return aTime - bTime;
-        } catch (e) {
-          console.error('排序日期错误:', e);
-          return 0;
-        }
-      },
-      ellipsis: true,
-    },
-    {
       title: '挂表日期',
       dataIndex: 'meter_installation_date',
       key: 'meter_installation_date',
@@ -2117,17 +2012,21 @@ const CustomerList = () => {
       render: (text, record) => {
         // 如果已挂表
         if (text) {
-          // 只有管理员可以将已挂表恢复为未挂表
-          const canReset = userRole === 'admin';
+          // 管理员或业务员可以编辑挂表日期
+          const canEdit = ['admin', 'salesman'].includes(userRole || '');
           
           return (
-            <Tooltip title={canReset ? '点击恢复为未挂表状态' : '挂表时间'}>
+            <Tooltip title={canEdit ? '单击重置状态，双击修改日期' : '挂表日期'}>
               <Tag 
                 color="green" 
-                style={{ cursor: canReset ? 'pointer' : 'default' }}
-                onClick={() => canReset && record.id && handleMeterInstallationChange(record.id)}
+                style={{ cursor: canEdit ? 'pointer' : 'default' }}
+                onClick={() => canEdit && record.id && handleMeterInstallationChange(record.id)}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  canEdit && record.id && showMeterInstallationDatePicker(record.id);
+                }}
               >
-                <ClockCircleOutlined /> {dayjs(text).format('YYYY-MM-DD HH:mm')}
+                <ClockCircleOutlined /> {dayjs(text).format('YYYY-MM-DD')}
               </Tag>
             </Tooltip>
           );
@@ -2566,7 +2465,7 @@ const CustomerList = () => {
   };
 
   // 处理上传国网状态变更
-  const handleUploadToGridChange = async (id: string | undefined) => {
+  const handleUploadToGridChange = async (id: string | undefined, customDate?: string) => {
     if (!id) {
       message.error('客户ID无效');
       return;
@@ -2579,10 +2478,19 @@ const CustomerList = () => {
         return;
       }
       
-      // 切换上传国网状态，当前有值则清空，无值则设置为当前日期
-      const updateObj: Record<string, any> = {
-        upload_to_grid: customer.upload_to_grid ? null : new Date().toISOString()
-      };
+      // 使用指定日期或根据当前状态切换
+      let updateObj: Record<string, any> = {};
+      if (customDate) {
+        // 如果提供了自定义日期，则使用该日期
+        updateObj = {
+          upload_to_grid: customDate
+        };
+      } else {
+        // 否则切换状态
+        updateObj = {
+          upload_to_grid: customer.upload_to_grid ? null : new Date().toISOString()
+        };
+      }
       
       // 使用数据缓存服务更新数据
       const updatedCustomer = customerApi.updateWithCache(id, updateObj);
@@ -2595,15 +2503,57 @@ const CustomerList = () => {
         prev.map(c => (c.id === id ? { ...c, ...updatedCustomer } : c))
       );
       
-      message.success(customer.upload_to_grid ? '已重置上传国网状态' : '已标记为已上传国网');
+      if (customDate) {
+        message.success('已更新上传国网日期');
+      } else {
+        message.success(customer.upload_to_grid ? '已重置上传国网状态' : '已标记为已上传国网');
+      }
     } catch (error) {
       console.error('更新上传国网状态失败:', error);
       message.error('操作失败，请重试');
     }
   };
 
+  // 显示上传国网日期选择对话框
+  const showUploadToGridDatePicker = (id: string | undefined) => {
+    if (!id) {
+      console.error('无效的客户ID');
+      message.error('操作失败: 无效的客户ID');
+      return;
+    }
+    
+    const customer = customers.find(c => c.id === id);
+    let selectedDate = customer?.upload_to_grid ? dayjs(customer.upload_to_grid) : dayjs();
+    
+    Modal.confirm({
+      title: '设置上传国网日期',
+      width: 400,
+      icon: null,
+      content: (
+        <div style={{ marginTop: 16 }}>
+          <DatePicker 
+            defaultValue={selectedDate}
+            onChange={(date) => {
+              if (date) {
+                selectedDate = date;
+              }
+            }}
+            style={{ width: '100%' }}
+          />
+        </div>
+      ),
+      okText: '确认',
+      cancelText: '取消',
+      onOk() {
+        if (selectedDate) {
+          handleUploadToGridChange(id, selectedDate.format('YYYY-MM-DD'));
+        }
+      }
+    });
+  };
+
   // 处理电表安装日期变更
-  const handleMeterInstallationChange = async (id: string | undefined) => {
+  const handleMeterInstallationChange = async (id: string | undefined, customDate?: string) => {
     if (!id) {
       message.error('客户ID无效');
       return;
@@ -2616,10 +2566,19 @@ const CustomerList = () => {
         return;
       }
       
-      // 切换电表安装状态，当前有值则清空，无值则设置为当前日期
-      const updateObj: Record<string, any> = {
-        meter_installation_date: customer.meter_installation_date ? null : new Date().toISOString()
-      };
+      // 使用指定日期或根据当前状态切换
+      let updateObj: Record<string, any> = {};
+      if (customDate) {
+        // 如果提供了自定义日期，则使用该日期
+        updateObj = {
+          meter_installation_date: customDate
+        };
+      } else {
+        // 否则切换状态
+        updateObj = {
+          meter_installation_date: customer.meter_installation_date ? null : new Date().toISOString()
+        };
+      }
       
       // 使用数据缓存服务更新数据
       const updatedCustomer = customerApi.updateWithCache(id, updateObj);
@@ -2632,11 +2591,53 @@ const CustomerList = () => {
         prev.map(c => (c.id === id ? { ...c, ...updatedCustomer } : c))
       );
       
-      message.success(customer.meter_installation_date ? '已重置电表安装状态' : '已标记为电表已安装');
+      if (customDate) {
+        message.success('已更新挂表日期');
+      } else {
+        message.success(customer.meter_installation_date ? '已重置挂表状态' : '已标记为已挂表');
+      }
     } catch (error) {
-      console.error('更新电表安装状态失败:', error);
+      console.error('更新挂表状态失败:', error);
       message.error('操作失败，请重试');
     }
+  };
+
+  // 显示挂表日期选择对话框
+  const showMeterInstallationDatePicker = (id: string | undefined) => {
+    if (!id) {
+      console.error('无效的客户ID');
+      message.error('操作失败: 无效的客户ID');
+      return;
+    }
+    
+    const customer = customers.find(c => c.id === id);
+    let selectedDate = customer?.meter_installation_date ? dayjs(customer.meter_installation_date) : dayjs();
+    
+    Modal.confirm({
+      title: '设置挂表日期',
+      width: 400,
+      icon: null,
+      content: (
+        <div style={{ marginTop: 16 }}>
+          <DatePicker 
+            defaultValue={selectedDate}
+            onChange={(date) => {
+              if (date) {
+                selectedDate = date;
+              }
+            }}
+            style={{ width: '100%' }}
+          />
+        </div>
+      ),
+      okText: '确认',
+      cancelText: '取消',
+      onOk() {
+        if (selectedDate) {
+          handleMeterInstallationChange(id, selectedDate.format('YYYY-MM-DD'));
+        }
+      }
+    });
   };
 
   // 处理建设验收状态变更
