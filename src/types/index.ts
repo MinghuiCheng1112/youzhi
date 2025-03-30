@@ -15,6 +15,7 @@ export interface Customer {
   filing_date: string | null // 备案日期
   meter_number: string // 电表号码
   designer: string // 设计师
+  designer_phone: string | null // 设计师电话
   drawing_change: string | null // 图纸变更
   urge_order: string | null // 催单
   capacity: number // 容量

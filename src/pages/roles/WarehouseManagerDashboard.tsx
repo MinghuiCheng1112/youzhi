@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { Table, Card, Input, Button, Typography, Space, message, Tag, Modal, Form, DatePicker, Statistic, Row, Col, Tooltip, Divider, Progress, Select } from 'antd'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { Table, Card, Input, Button, Typography, Space, message, Tag, Modal, Form, DatePicker, Statistic, Row, Col, Tooltip, Divider, Progress } from 'antd'
 import { 
   SearchOutlined,
   ReloadOutlined,
@@ -32,6 +32,18 @@ type OutboundStatus = 'none' | 'outbound' | 'inbound' | 'returned';
 const { Title, Text } = Typography
 const { confirm } = Modal
 
+// 定义卡片样式
+const CARD_STYLE = {
+  height: '140px',
+  display: 'flex' as const,
+  flexDirection: 'column' as const,
+  justifyContent: 'center' as const,
+  boxShadow: '0 2px 8px rgba(0,0,0,0.09)',
+  borderRadius: '8px',
+  transition: 'all 0.3s',
+  padding: '0 16px',
+}
+
 const WarehouseManagerDashboard = () => {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [filteredCustomers, setFilteredCustomers] = useState<Customer[]>([])
@@ -43,92 +55,54 @@ const WarehouseManagerDashboard = () => {
   const { user } = useAuth()
   const navigate = useNavigate()
   
-  // 添加分页相关状态
-  const [currentPage, setCurrentPage] = useState(1)
-  const [pageSize, setPageSize] = useState(100)
-  
-  // 添加搜索相关状态标志
-  const [isSearching, setIsSearching] = useState(false)
-  
-  // 添加排序相关状态
-  const [sortField, setSortField] = useState<string>('')
-  const [sortOrder, setSortOrder] = useState<'ascend' | 'descend' | undefined>(undefined)
-  
   // 添加业务员映射表状态
   const [salesmenMap, setSalesmenMap] = useState<Map<string, {name: string, phone: string}>>(new Map())
   
-  // 添加索引化数据结构，用于加速搜索
-  const [searchableCustomers, setSearchableCustomers] = useState<Array<{
-    original: Customer,
-    searchableText: string
-  }>>([]);
-  
+  // 统计数据
+  const [stats, setStats] = useState({
+    totalCustomers: 0,
+    outboundCustomers: 0,
+    pendingOutbound: 0,
+    urgeOrderCount: 0,
+    drawingChangeCount: 0
+  })
+
   // 添加防抖搜索
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
-  
-  // 预处理客户数据，创建用于搜索的索引
-  useEffect(() => {
-    const preProcessedData = customers.map(customer => ({
-      original: customer,
-      searchableText: [
-        customer.customer_name || '',
-        customer.phone || '',
-        customer.address || '',
-        customer.salesman || '',
-        customer.construction_team || ''
-      ].join(' ').toLowerCase()
-    }));
-    
-    setSearchableCustomers(preProcessedData);
-    
-    // 初始显示所有数据
-    setFilteredCustomers(customers);
-  }, [customers]);
   
   // 使用useCallback封装搜索逻辑
   const handleSearch = useCallback((value: string) => {
     // 设置搜索文本
     setSearchText(value);
     
-    // 如果搜索文本为空，直接显示所有数据
-    if (!value.trim()) {
-      setFilteredCustomers(customers);
-      return;
-    }
-    
     // 如果已经有一个定时器在运行，清除它
     if (debounceTimer.current) {
       clearTimeout(debounceTimer.current);
     }
     
-    // 显示搜索状态，提供视觉反馈
-    setIsSearching(true);
-    
     // 设置新的定时器
     debounceTimer.current = setTimeout(() => {
+      const lowercasedFilter = value.toLowerCase();
+      
       // 性能监控 - 开始过滤
       console.time('搜索过滤');
       
-      const lowercasedFilter = value.toLowerCase();
+      const filtered = customers.filter(item => {
+        return (
+          (item.customer_name && item.customer_name.toLowerCase().includes(lowercasedFilter)) ||
+          (item.phone && item.phone.toLowerCase().includes(lowercasedFilter)) ||
+          (item.address && item.address.toLowerCase().includes(lowercasedFilter)) ||
+          (item.salesman && item.salesman.toLowerCase().includes(lowercasedFilter)) ||
+          (item.construction_team && item.construction_team.toLowerCase().includes(lowercasedFilter))
+        );
+      });
       
-      // 使用预处理的数据进行搜索，提高效率
-      const filtered = searchableCustomers
-        .filter(item => item.searchableText.includes(lowercasedFilter))
-        .map(item => item.original);
-      
-      // 修改页码至第一页
-      setCurrentPage(1);
-      
-      // 更新过滤后的数据
       setFilteredCustomers(filtered);
-      
-      // 完成搜索
-      setIsSearching(false);
       
       // 性能监控 - 结束过滤
       console.timeEnd('搜索过滤');
-    }, 400); // 增加防抖延迟到400ms，减少搜索频率
-  }, [customers, searchableCustomers]);
+    }, 300); // 300ms防抖延迟
+  }, [customers]);
   
   // 清除防抖定时器
   useEffect(() => {
@@ -165,6 +139,9 @@ const WarehouseManagerDashboard = () => {
       
       // 初始化数据缓存服务
       dataCacheService.initCache(data);
+      
+      // 更新统计数据
+      updateStats(data);
       
       // 批量更新UI状态，减少渲染次数
       setCustomers(data)
@@ -234,6 +211,23 @@ const WarehouseManagerDashboard = () => {
     return email;
   };
 
+  // 添加更新统计数据的函数
+  const updateStats = (data: Customer[]) => {
+    const totalCustomers = data.length;
+    const outboundCustomers = data.filter(c => c.component_outbound_date || c.square_steel_outbound_date).length;
+    const pendingOutbound = data.filter(c => !c.component_outbound_date && !c.square_steel_outbound_date).length;
+    const urgeOrderCount = data.filter(c => c.urge_order).length;
+    const drawingChangeCount = data.filter(c => c.drawing_change).length;
+    
+    setStats({
+      totalCustomers,
+      outboundCustomers,
+      pendingOutbound,
+      urgeOrderCount,
+      drawingChangeCount
+    });
+  };
+
   // 处理出库状态变更
   const handleOutboundStatusChange = async (id: string | undefined, type: 'square_steel' | 'component', status: OutboundStatus) => {
     if (!id) {
@@ -290,6 +284,25 @@ const WarehouseManagerDashboard = () => {
       setFilteredCustomers(prevFiltered => 
         prevFiltered.map(c => c.id === id ? { ...c, ...updateData } : c)
       );
+      
+      // 局部更新统计数据
+      const isOutboundStatusChange = 
+        (type === 'component' && !customer.component_outbound_date && status === 'outbound') ||
+        (type === 'component' && customer.component_outbound_date && status === 'none') ||
+        (type === 'square_steel' && !customer.square_steel_outbound_date && status === 'outbound') ||
+        (type === 'square_steel' && customer.square_steel_outbound_date && status === 'none');
+        
+      if (isOutboundStatusChange) {
+        setStats(prev => {
+          const outboundChange = status === 'outbound' ? 1 : -1;
+          
+          return {
+            ...prev,
+            outboundCustomers: prev.outboundCustomers + outboundChange,
+            pendingOutbound: prev.pendingOutbound - outboundChange
+          };
+        });
+      }
       
       // 提示成功
       let actionText = '';
@@ -443,6 +456,40 @@ const WarehouseManagerDashboard = () => {
         prevFiltered.map(c => c.id === currentCustomer.id ? { ...c, ...formattedValues } : c)
       );
       
+      // 检查是否需要更新统计数据（仅在出库状态发生变化时）
+      const isComponentStatusChange = 
+        (!currentCustomer.component_outbound_date && formattedValues.component_outbound_date) || 
+        (currentCustomer.component_outbound_date && !formattedValues.component_outbound_date);
+        
+      const isSquareSteelStatusChange = 
+        (!currentCustomer.square_steel_outbound_date && formattedValues.square_steel_outbound_date) || 
+        (currentCustomer.square_steel_outbound_date && !formattedValues.square_steel_outbound_date);
+        
+      if (isComponentStatusChange || isSquareSteelStatusChange) {
+        // 计算出库状态变化
+        let outboundChange = 0;
+        
+        // 如果之前没有任何出库但现在有一项出库了
+        const wasOutbound = currentCustomer.component_outbound_date || currentCustomer.square_steel_outbound_date;
+        const isOutbound = formattedValues.component_outbound_date || formattedValues.square_steel_outbound_date;
+        
+        if (!wasOutbound && isOutbound) {
+          outboundChange = 1;
+        } 
+        // 如果之前有出库但现在都没有了
+        else if (wasOutbound && !isOutbound) {
+          outboundChange = -1;
+        }
+        
+        if (outboundChange !== 0) {
+          setStats(prev => ({
+            ...prev,
+            outboundCustomers: prev.outboundCustomers + outboundChange,
+            pendingOutbound: prev.pendingOutbound - outboundChange
+          }));
+        }
+      }
+      
       message.success('出库信息更新成功')
       setOutboundModalVisible(false)
       
@@ -494,7 +541,7 @@ const WarehouseManagerDashboard = () => {
   }
 
   // 表格列定义
-  const columns = useMemo(() => [
+  const columns = [
     {
       title: '图纸变更',
       dataIndex: 'drawing_change',
@@ -977,102 +1024,13 @@ const WarehouseManagerDashboard = () => {
       ),
       sorter: (a: Customer, b: Customer) => (a.remarks || '').localeCompare(b.remarks || ''),
     }
-  ], [customers, salesmenMap, handleOutboundStatusChange, handleItemOutboundToggle, getSalesmanName]);
-
-  // 对所有数据进行排序处理
-  const sortedData = useMemo(() => {
-    // 如果没有排序字段，直接返回原数据
-    if (!sortField || !sortOrder) {
-      return filteredCustomers;
-    }
-
-    // 复制数据进行排序，避免修改原数据
-    const result = [...filteredCustomers];
-    
-    // 根据排序字段查找对应的列配置
-    const column = columns.find(col => col.key === sortField || col.dataIndex === sortField);
-    
-    if (column && column.sorter && typeof column.sorter === 'function') {
-      // 使用列的自定义排序函数
-      result.sort((a, b) => {
-        const sortResult = (column.sorter as Function)(a, b);
-        return sortOrder === 'ascend' ? sortResult : -sortResult;
-      });
-    } else {
-      // 默认排序逻辑
-      result.sort((a, b) => {
-        const aValue = a[sortField as keyof Customer];
-        const bValue = b[sortField as keyof Customer];
-        
-        if (aValue === undefined && bValue === undefined) return 0;
-        if (aValue === undefined) return sortOrder === 'ascend' ? 1 : -1;
-        if (bValue === undefined) return sortOrder === 'ascend' ? -1 : 1;
-        
-        if (typeof aValue === 'string' && typeof bValue === 'string') {
-          return sortOrder === 'ascend' 
-            ? aValue.localeCompare(bValue)
-            : bValue.localeCompare(aValue);
-        } else {
-          // 数字或布尔值排序
-          const compareResult = (aValue as any) - (bValue as any);
-          return sortOrder === 'ascend' ? compareResult : -compareResult;
-        }
-      });
-    }
-    
-    return result;
-  }, [filteredCustomers, sortField, sortOrder, columns]);
-
-  // 更新页面数据计算逻辑，使用排序后的数据
-  const currentPageData = useMemo(() => {
-    return sortedData.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-  }, [sortedData, currentPage, pageSize]);
+  ]
 
   return (
     <div className="warehouse-dashboard">
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, alignItems: 'center' }}>
-        <Title level={2} style={{ margin: 0 }}>仓库工作台</Title>
-
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <Button 
-            type={pageSize === 100 ? 'primary' : 'default'} 
-            onClick={() => {
-              setPageSize(100);
-              setCurrentPage(1);
-            }}
-          >
-            100条/页
-          </Button>
-          <Button 
-            type={pageSize === 500 ? 'primary' : 'default'} 
-            onClick={() => {
-              setPageSize(500);
-              setCurrentPage(1);
-            }}
-          >
-            500条/页
-          </Button>
-          <Button 
-            type={pageSize === 1000 ? 'primary' : 'default'} 
-            onClick={() => {
-              setPageSize(1000);
-              setCurrentPage(1);
-            }}
-          >
-            1000条/页
-          </Button>
-
-          <Select 
-            value={`${currentPage} / ${Math.ceil(filteredCustomers.length / pageSize)}`}
-            style={{ width: 100, marginLeft: 8 }}
-            onChange={(value) => setCurrentPage(parseInt(value))}
-            dropdownMatchSelectWidth={false}
-          >
-            {Array.from({ length: Math.ceil(filteredCustomers.length / pageSize) }, (_, i) => i + 1).map(page => (
-              <Select.Option key={page} value={page}>{page} / {Math.ceil(filteredCustomers.length / pageSize)}</Select.Option>
-            ))}
-          </Select>
-          
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+        <Title level={2}>仓库工作台</Title>
+        <Space>
           <Input
             placeholder="搜索客户姓名/电话/地址"
             value={searchText}
@@ -1082,12 +1040,10 @@ const WarehouseManagerDashboard = () => {
             allowClear
           />
           <Button 
-            type="primary"
-            icon={<SearchOutlined />} 
-            onClick={() => handleSearch(searchText)}
-            loading={isSearching}
+            icon={<ReloadOutlined />} 
+            onClick={fetchCustomers}
           >
-            搜索
+            刷新
           </Button>
           <Button 
             type="primary" 
@@ -1097,17 +1053,91 @@ const WarehouseManagerDashboard = () => {
           >
             导出数据
           </Button>
-        </div>
+        </Space>
       </div>
+
+      {/* 统计卡片 */}
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Col span={6}>
+          <Card hoverable style={CARD_STYLE}>
+            <Statistic 
+              title="催单数" 
+              value={stats.urgeOrderCount} 
+              suffix="户" 
+              valueStyle={{ color: '#fa8c16' }}
+            />
+            {stats.totalCustomers > 0 && (
+              <Progress 
+                percent={Math.round(stats.urgeOrderCount / stats.totalCustomers * 100)} 
+                showInfo={false} 
+                status="active" 
+                strokeColor="#fa8c16" 
+                style={{ marginTop: 8 }} 
+              />
+            )}
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card hoverable style={CARD_STYLE}>
+            <Statistic 
+              title="已出库" 
+              value={stats.outboundCustomers} 
+              suffix="户" 
+              valueStyle={{ color: '#3f8600' }}
+            />
+            {stats.totalCustomers > 0 && (
+              <Progress 
+                percent={Math.round(stats.outboundCustomers / stats.totalCustomers * 100)} 
+                strokeColor="#3f8600" 
+                style={{ marginTop: 8 }} 
+              />
+            )}
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card hoverable style={CARD_STYLE}>
+            <Statistic 
+              title="待出库" 
+              value={stats.pendingOutbound} 
+              suffix="户" 
+              valueStyle={{ color: '#cf1322' }}
+            />
+            {stats.totalCustomers > 0 && (
+              <Progress 
+                percent={Math.round(stats.pendingOutbound / stats.totalCustomers * 100)} 
+                strokeColor="#cf1322" 
+                style={{ marginTop: 8 }} 
+              />
+            )}
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card hoverable style={CARD_STYLE}>
+            <Statistic 
+              title="图纸变更" 
+              value={stats.drawingChangeCount} 
+              suffix="户" 
+              valueStyle={{ color: '#9254de' }}
+            />
+            {stats.totalCustomers > 0 && (
+              <Progress 
+                percent={Math.round(stats.drawingChangeCount / stats.totalCustomers * 100)} 
+                strokeColor="#9254de" 
+                style={{ marginTop: 8 }} 
+              />
+            )}
+          </Card>
+        </Col>
+      </Row>
 
       {/* 客户表格 */}
       <div className="customer-list-container" style={{ height: '100%', display: 'flex', flexDirection: 'column', marginBottom: 0, paddingBottom: 0 }}>
         <Table
           columns={columns}
-          dataSource={currentPageData}
+          dataSource={filteredCustomers}
           rowKey="id"
           loading={loading}
-          scroll={{ x: 'max-content', y: 'calc(100vh - 250px)' }}
+          scroll={{ x: 'max-content', y: 'calc(100vh - 200px)' }}
           pagination={false}
           bordered
           size="middle"
@@ -1115,15 +1145,6 @@ const WarehouseManagerDashboard = () => {
           className="customer-table"
           style={{ flex: 1, overflow: 'auto' }}
           sticky={{ offsetHeader: 0 }}
-          onChange={(pagination, filters, sorter) => {
-            if (sorter && 'field' in sorter) {
-              setSortField(sorter.field as string);
-              setSortOrder(sorter.order);
-            } else {
-              setSortField('');
-              setSortOrder(undefined);
-            }
-          }}
         />
       </div>
 
@@ -1282,14 +1303,6 @@ const WarehouseManagerDashboard = () => {
             height: 100%;
             display: flex;
             flex-direction: column;
-          }
-          
-          /* 分页按钮组样式 */
-          .warehouse-dashboard .ant-btn {
-            border-radius: 4px;
-            font-size: 14px;
-            height: 32px;
-            padding: 0 16px;
           }
           
           /* 美化滚动条 - 针对整个页面的所有滚动条 */

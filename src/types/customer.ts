@@ -13,6 +13,8 @@ export interface Customer {
   construction_team_phone?: string | null;
   surveyor?: string | null;
   surveyor_phone?: string | null;
+  designer?: string | null;
+  designer_phone?: string | null;
   salesman?: string | null;
   module_count?: number;
   capacity?: number;

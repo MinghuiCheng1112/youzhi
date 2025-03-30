@@ -247,6 +247,7 @@ const SurveyorDashboard = () => {
       '业务员电话': customer.salesman_phone,
       '电表号码': customer.meter_number,
       '设计师': customer.designer,
+      '设计师电话': customer.designer_phone,
       '图纸变更': customer.drawing_change === true ? '是' : '否',
       '补充资料': Array.isArray(customer.station_management) 
         ? customer.station_management.join(', ')
@@ -521,6 +522,22 @@ const SurveyorDashboard = () => {
           record={record} 
           dataIndex="designer" 
           title="设计师" 
+          required={false}
+          onSave={handleCellSave}
+        />
+      ),
+    },
+    {
+      title: '设计师电话',
+      dataIndex: 'designer_phone',
+      key: 'designer_phone',
+      width: 130,
+      render: (text: string, record: Customer) => (
+        <EditableCell 
+          value={text} 
+          record={record} 
+          dataIndex="designer_phone" 
+          title="设计师电话" 
           required={false}
           onSave={handleCellSave}
         />

@@ -8,6 +8,7 @@ export interface Customer {
   filing_date?: string | null;
   meter_number?: string;
   designer?: string;
+  designer_phone?: string | null;
   drawing_change?: boolean;
   urge_order?: string | null;
   module_count?: number;

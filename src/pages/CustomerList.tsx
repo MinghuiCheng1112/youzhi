@@ -52,9 +52,6 @@ const CustomerList = () => {
   const [pageSize, setPageSize] = useState<number>(100)
   const [currentPage, setCurrentPage] = useState<number>(1)
   const [totalPages, setTotalPages] = useState<number>(1)
-  // 添加排序相关状态
-  const [sortField, setSortField] = useState<string>('')
-  const [sortOrder, setSortOrder] = useState<'ascend' | 'descend' | undefined>(undefined)
   
   const STATION_MANAGEMENT_OPTIONS = [
     { value: '房产证', label: '房产证', color: 'blue' },
@@ -80,10 +77,14 @@ const CustomerList = () => {
   const [constructionTeams, setConstructionTeams] = useState<{name: string, phone: string}[]>([]);
   const [surveyors, setSurveyors] = useState<{ name: string; phone: string }[]>([])
 
+  // 设计师选项
+  const [designers, setDesigners] = useState<{name: string, phone: string}[]>([]);
+
   useEffect(() => {
     fetchCustomers()
     fetchConstructionTeams()
     fetchSurveyors()
+    fetchDesigners()
   }, [])
 
   // 获取所有客户数据
@@ -350,43 +351,80 @@ const CustomerList = () => {
     }
   };
 
+  // 获取设计师信息
+  const fetchDesigners = async () => {
+    try {
+      // 从客户表中提取唯一的设计师及其电话
+      const { data, error } = await supabase
+        .from('customers')
+        .select('designer, designer_phone')
+        .not('designer', 'is', null)
+        .not('designer', 'eq', '')
+        .order('designer', { ascending: true });
+
+      if (error) {
+        console.error('获取设计师数据失败:', error);
+        return;
+      }
+
+      // 去重合并设计师信息
+      const uniqueDesigners = new Map();
+      data.forEach(item => {
+        if (item.designer && !uniqueDesigners.has(item.designer)) {
+          uniqueDesigners.set(item.designer, {
+            name: item.designer,
+            phone: item.designer_phone || ''
+          });
+        }
+      });
+
+      setDesigners(Array.from(uniqueDesigners.values()));
+    } catch (err) {
+      console.error('获取设计师数据时出错:', err);
+    }
+  };
+
   // 优化的搜索函数
   const performSearch = (value: string) => {
-    const searchText = value.trim().toLowerCase();
-    
-    if (searchText === '') {
-      // 如果搜索文本为空，显示所有客户
+    // 如果搜索为空，直接返回所有数据
+    if (!value.trim()) {
       setFilteredCustomers(customers);
-      // 使用排序后的数据计算总页数
       setTotalPages(Math.ceil(customers.length / pageSize));
-    } else {
-      // 支持空格或逗号分隔的多关键词搜索
-      const keywords = searchText
-        .split(/[\s,，]+/) // 按空格或中英文逗号分隔
-        .filter(keyword => keyword.trim() !== ''); // 过滤掉空字符串
+      return;
+    }
+
+    // 支持空格或逗号分隔的多关键词搜索
+    const keywords = value.toLowerCase()
+      .split(/[\s,，]+/) // 按空格或中英文逗号分隔
+      .filter(keyword => keyword.trim() !== ''); // 过滤掉空字符串
+    
+    // 使用高效的单次遍历过滤
+    const filtered = customers.filter(customer => {
+      // 只检查最重要的几个字段，减少遍历次数
+      const name = (customer.customer_name || '').toLowerCase();
+      const phone = (customer.phone || '').toLowerCase();
+      const address = (customer.address || '').toLowerCase();
+      const salesman = (customer.salesman || '').toLowerCase();
+      const idCard = (customer.id_card || '').toLowerCase();
+      const meterNumber = (customer.meter_number || '').toLowerCase();
       
-      const filtered = customers.filter(customer => {
-        const name = (customer.customer_name || '').toLowerCase();
-        const phone = (customer.phone || '').toLowerCase();
-        const address = (customer.address || '').toLowerCase();
-        const salesman = (customer.salesman || '').toLowerCase();
-        const idCard = (customer.id_card || '').toLowerCase();
-        const meterNumber = (customer.meter_number || '').toLowerCase();
-        
-        // 对每个关键词进行检查，只要有一个关键词匹配任何字段就返回true
-        return keywords.some(keyword => 
-          name.includes(keyword) || 
-          phone.includes(keyword) || 
-          address.includes(keyword) || 
-          salesman.includes(keyword) ||
-          idCard.includes(keyword) ||
-          meterNumber.includes(keyword)
-        );
-      });
-      
-      setFilteredCustomers(filtered);
-      // 使用排序后的数据计算总页数
-      setTotalPages(Math.ceil(filtered.length / pageSize));
+      // 对每个关键词进行检查，只要有一个关键词匹配任何字段就返回true
+      return keywords.some(keyword => 
+        name.includes(keyword) || 
+        phone.includes(keyword) || 
+        address.includes(keyword) || 
+        salesman.includes(keyword) ||
+        idCard.includes(keyword) ||
+        meterNumber.includes(keyword)
+      );
+    });
+    
+    setFilteredCustomers(filtered);
+    setTotalPages(Math.ceil(filtered.length / pageSize));
+    
+    // 只在真正需要时显示消息，且仅在用户显式触发搜索时（通过handleSearch函数）
+    if (filtered.length === 0 && customers.length > 0 && value.length > 0) {
+      // 消息显示逻辑移至handleSearch函数
     }
   };
   
@@ -1312,6 +1350,23 @@ const CustomerList = () => {
       render: (value, record) => <EditableCell value={value} record={record} dataIndex="salesman_phone" title="业务员电话" required={false} />
     },
     {
+      title: '设计师',
+      dataIndex: 'designer',
+      key: 'designer',
+      width: 120,
+      sorter: (a, b) => (a.designer || '').localeCompare(b.designer || ''),
+      ellipsis: true,
+      render: (value, record) => <DesignerCell value={value} record={record} />
+    },
+    {
+      title: '设计师电话',
+      dataIndex: 'designer_phone',
+      key: 'designer_phone',
+      width: 130,
+      ellipsis: true,
+      render: (value, record) => <DesignerPhoneCell value={value} record={record} />
+    },
+    {
       title: '踏勘员',
       dataIndex: 'surveyor',
       key: 'surveyor',
@@ -1373,15 +1428,6 @@ const CustomerList = () => {
       width: 140,
       ellipsis: true,
       render: (value, record) => <EditableCell value={value} record={record} dataIndex="meter_number" title="电表号码" required={false} />
-    },
-    {
-      title: '设计师',
-      dataIndex: 'designer',
-      key: 'designer',
-      width: 120,
-      sorter: (a, b) => (a.designer || '').localeCompare(b.designer || ''),
-      ellipsis: true,
-      render: (value, record) => <EditableCell value={value} record={record} dataIndex="designer" title="设计师" required={false} />
     },
     {
       title: '图纸变更',
@@ -1961,28 +2007,24 @@ const CustomerList = () => {
       width: 130,
       align: 'center' as const,
       render: (text, record) => {
-        // 如果已上传国网
+        // 如果已上传
         if (text) {
-          // 管理员或业务员可以编辑上传国网日期
-          const canEdit = ['admin', 'salesman'].includes(userRole || '');
+          // 只有管理员可以将已上传恢复为未上传
+          const canReset = userRole === 'admin';
           
           return (
-            <Tooltip title={canEdit ? '单击重置状态，双击修改日期' : '上传国网日期'}>
+            <Tooltip title={canReset ? '点击恢复为未上传状态' : '上传时间'}>
               <Tag 
                 color="green" 
-                style={{ cursor: canEdit ? 'pointer' : 'default' }}
-                onClick={() => canEdit && record.id && handleUploadToGridChange(record.id)}
-                onDoubleClick={(e) => {
-                  e.stopPropagation();
-                  canEdit && record.id && showUploadToGridDatePicker(record.id);
-                }}
+                style={{ cursor: canReset ? 'pointer' : 'default' }}
+                onClick={() => canReset && record.id && handleUploadToGridChange(record.id)}
               >
-                <ClockCircleOutlined /> {dayjs(text).format('YYYY-MM-DD')}
+                <ClockCircleOutlined /> {dayjs(text).format('YYYY-MM-DD HH:mm')}
               </Tag>
             </Tooltip>
           );
         } else {
-          // 未上传国网状态，显示按钮
+          // 未上传状态，显示按钮
           return (
             <Button 
               type="primary" 
@@ -1990,7 +2032,7 @@ const CustomerList = () => {
               ghost
               onClick={() => record.id && handleUploadToGridChange(record.id)}
             >
-              上传国网
+              上传
             </Button>
           );
         }
@@ -2004,6 +2046,115 @@ const CustomerList = () => {
       ellipsis: true,
     },
     {
+      title: '建设验收',
+      dataIndex: 'construction_acceptance',
+      key: 'construction_acceptance',
+      width: 130,
+      align: 'center' as const,
+      render: (text, record) => {
+        // 如果已推到
+        if (text) {
+          // 只有管理员可以将已推到恢复为未推到
+          const canReset = userRole === 'admin';
+          
+          // 检查是否是等待状态
+          let isWaiting = false;
+          let displayText = '';
+          
+          // 检查text是否为等待格式："waiting:天数:开始日期"
+          if (typeof text === 'string' && text.startsWith('waiting:')) {
+            isWaiting = true;
+            const parts = text.split(':');
+            if (parts.length === 3) {
+              const initialDays = parseInt(parts[1], 10);
+              const startDate = parts[2];
+              
+              try {
+                // 检查日期有效性
+                if (dayjs(startDate).isValid()) {
+              // 计算从开始日期至今已等待天数
+              const elapsedDays = dayjs().diff(dayjs(startDate), 'day');
+              // 计算当前累计等待天数
+              const totalWaitDays = initialDays + elapsedDays;
+              
+              displayText = `已等待 ${totalWaitDays} 天`;
+                } else {
+                  console.warn(`建设验收等待起始日期无效: ${startDate}`);
+                  displayText = `已等待 ${initialDays} 天`;
+                }
+              } catch (error) {
+                console.error('计算等待天数错误:', error);
+                displayText = `已等待 ${initialDays} 天`;
+              }
+            } else {
+              displayText = '等待中';
+            }
+          } else {
+            // 普通日期显示
+            try {
+              // 检查日期有效性
+              if (dayjs(text).isValid()) {
+            displayText = dayjs(text).format('YYYY-MM-DD HH:mm');
+              } else if (text === true || text === 'true' || text === false || text === 'false') {
+                // 处理布尔值情况
+                displayText = dayjs().format('YYYY-MM-DD HH:mm');
+                console.warn(`建设验收日期字段为布尔值: ${text}，使用当前时间替代`);
+              } else {
+                console.warn(`无效的建设验收日期: ${text}`);
+                displayText = '已验收';
+              }
+            } catch (error) {
+              console.error('建设验收日期格式化错误:', error);
+              displayText = '已验收';
+            }
+          }
+          
+          return (
+            <Tooltip title={canReset ? '点击恢复为未推到状态' : '推到时间/等待状态'}>
+              <Tag 
+                color={isWaiting ? 'orange' : 'green'} 
+                style={{ cursor: canReset ? 'pointer' : 'default' }}
+                onClick={() => canReset && record.id && handleConstructionAcceptanceChange(record.id, text)}
+              >
+                <ClockCircleOutlined /> {displayText}
+              </Tag>
+            </Tooltip>
+          );
+        } else {
+          // 未推到状态，显示按钮
+          return (
+            <Button 
+              type="primary" 
+              size="small"
+              danger
+              ghost
+              onClick={() => record.id && showConstructionAcceptanceOptions(record.id)}
+            >
+              未推到
+            </Button>
+          );
+        }
+      },
+      sorter: (a, b) => {
+        if (!a.construction_acceptance && !b.construction_acceptance) return 0
+        if (!a.construction_acceptance) return -1
+        if (!b.construction_acceptance) return 1
+        
+        try {
+          // 确保日期比较不会因格式无效而崩溃
+          const aTime = dayjs(a.construction_acceptance).isValid() ? 
+            new Date(a.construction_acceptance).getTime() : 0;
+          const bTime = dayjs(b.construction_acceptance).isValid() ? 
+            new Date(b.construction_acceptance).getTime() : 0;
+          return aTime - bTime;
+        } catch (e) {
+          console.error('排序日期错误:', e);
+          return 0;
+        }
+      },
+      ellipsis: true,
+    },
+    {
       title: '挂表日期',
       dataIndex: 'meter_installation_date',
       key: 'meter_installation_date',
@@ -2012,21 +2163,17 @@ const CustomerList = () => {
       render: (text, record) => {
         // 如果已挂表
         if (text) {
-          // 管理员或业务员可以编辑挂表日期
-          const canEdit = ['admin', 'salesman'].includes(userRole || '');
+          // 只有管理员可以将已挂表恢复为未挂表
+          const canReset = userRole === 'admin';
           
           return (
-            <Tooltip title={canEdit ? '单击重置状态，双击修改日期' : '挂表日期'}>
+            <Tooltip title={canReset ? '点击恢复为未挂表状态' : '挂表时间'}>
               <Tag 
                 color="green" 
-                style={{ cursor: canEdit ? 'pointer' : 'default' }}
-                onClick={() => canEdit && record.id && handleMeterInstallationChange(record.id)}
-                onDoubleClick={(e) => {
-                  e.stopPropagation();
-                  canEdit && record.id && showMeterInstallationDatePicker(record.id);
-                }}
+                style={{ cursor: canReset ? 'pointer' : 'default' }}
+                onClick={() => canReset && record.id && handleMeterInstallationChange(record.id)}
               >
-                <ClockCircleOutlined /> {dayjs(text).format('YYYY-MM-DD')}
+                <ClockCircleOutlined /> {dayjs(text).format('YYYY-MM-DD HH:mm')}
               </Tag>
             </Tooltip>
           );
@@ -2465,7 +2612,7 @@ const CustomerList = () => {
   };
 
   // 处理上传国网状态变更
-  const handleUploadToGridChange = async (id: string | undefined, customDate?: string) => {
+  const handleUploadToGridChange = async (id: string | undefined) => {
     if (!id) {
       message.error('客户ID无效');
       return;
@@ -2478,19 +2625,10 @@ const CustomerList = () => {
         return;
       }
       
-      // 使用指定日期或根据当前状态切换
-      let updateObj: Record<string, any> = {};
-      if (customDate) {
-        // 如果提供了自定义日期，则使用该日期
-        updateObj = {
-          upload_to_grid: customDate
-        };
-      } else {
-        // 否则切换状态
-        updateObj = {
-          upload_to_grid: customer.upload_to_grid ? null : new Date().toISOString()
-        };
-      }
+      // 切换上传国网状态，当前有值则清空，无值则设置为当前日期
+      const updateObj: Record<string, any> = {
+        upload_to_grid: customer.upload_to_grid ? null : new Date().toISOString()
+      };
       
       // 使用数据缓存服务更新数据
       const updatedCustomer = customerApi.updateWithCache(id, updateObj);
@@ -2503,57 +2641,15 @@ const CustomerList = () => {
         prev.map(c => (c.id === id ? { ...c, ...updatedCustomer } : c))
       );
       
-      if (customDate) {
-        message.success('已更新上传国网日期');
-      } else {
-        message.success(customer.upload_to_grid ? '已重置上传国网状态' : '已标记为已上传国网');
-      }
+      message.success(customer.upload_to_grid ? '已重置上传国网状态' : '已标记为已上传国网');
     } catch (error) {
       console.error('更新上传国网状态失败:', error);
       message.error('操作失败，请重试');
     }
   };
 
-  // 显示上传国网日期选择对话框
-  const showUploadToGridDatePicker = (id: string | undefined) => {
-    if (!id) {
-      console.error('无效的客户ID');
-      message.error('操作失败: 无效的客户ID');
-      return;
-    }
-    
-    const customer = customers.find(c => c.id === id);
-    let selectedDate = customer?.upload_to_grid ? dayjs(customer.upload_to_grid) : dayjs();
-    
-    Modal.confirm({
-      title: '设置上传国网日期',
-      width: 400,
-      icon: null,
-      content: (
-        <div style={{ marginTop: 16 }}>
-          <DatePicker 
-            defaultValue={selectedDate}
-            onChange={(date) => {
-              if (date) {
-                selectedDate = date;
-              }
-            }}
-            style={{ width: '100%' }}
-          />
-        </div>
-      ),
-      okText: '确认',
-      cancelText: '取消',
-      onOk() {
-        if (selectedDate) {
-          handleUploadToGridChange(id, selectedDate.format('YYYY-MM-DD'));
-        }
-      }
-    });
-  };
-
   // 处理电表安装日期变更
-  const handleMeterInstallationChange = async (id: string | undefined, customDate?: string) => {
+  const handleMeterInstallationChange = async (id: string | undefined) => {
     if (!id) {
       message.error('客户ID无效');
       return;
@@ -2566,19 +2662,10 @@ const CustomerList = () => {
         return;
       }
       
-      // 使用指定日期或根据当前状态切换
-      let updateObj: Record<string, any> = {};
-      if (customDate) {
-        // 如果提供了自定义日期，则使用该日期
-        updateObj = {
-          meter_installation_date: customDate
-        };
-      } else {
-        // 否则切换状态
-        updateObj = {
-          meter_installation_date: customer.meter_installation_date ? null : new Date().toISOString()
-        };
-      }
+      // 切换电表安装状态，当前有值则清空，无值则设置为当前日期
+      const updateObj: Record<string, any> = {
+        meter_installation_date: customer.meter_installation_date ? null : new Date().toISOString()
+      };
       
       // 使用数据缓存服务更新数据
       const updatedCustomer = customerApi.updateWithCache(id, updateObj);
@@ -2591,53 +2678,11 @@ const CustomerList = () => {
         prev.map(c => (c.id === id ? { ...c, ...updatedCustomer } : c))
       );
       
-      if (customDate) {
-        message.success('已更新挂表日期');
-      } else {
-        message.success(customer.meter_installation_date ? '已重置挂表状态' : '已标记为已挂表');
-      }
+      message.success(customer.meter_installation_date ? '已重置电表安装状态' : '已标记为电表已安装');
     } catch (error) {
-      console.error('更新挂表状态失败:', error);
+      console.error('更新电表安装状态失败:', error);
       message.error('操作失败，请重试');
     }
-  };
-
-  // 显示挂表日期选择对话框
-  const showMeterInstallationDatePicker = (id: string | undefined) => {
-    if (!id) {
-      console.error('无效的客户ID');
-      message.error('操作失败: 无效的客户ID');
-      return;
-    }
-    
-    const customer = customers.find(c => c.id === id);
-    let selectedDate = customer?.meter_installation_date ? dayjs(customer.meter_installation_date) : dayjs();
-    
-    Modal.confirm({
-      title: '设置挂表日期',
-      width: 400,
-      icon: null,
-      content: (
-        <div style={{ marginTop: 16 }}>
-          <DatePicker 
-            defaultValue={selectedDate}
-            onChange={(date) => {
-              if (date) {
-                selectedDate = date;
-              }
-            }}
-            style={{ width: '100%' }}
-          />
-        </div>
-      ),
-      okText: '确认',
-      cancelText: '取消',
-      onOk() {
-        if (selectedDate) {
-          handleMeterInstallationChange(id, selectedDate.format('YYYY-MM-DD'));
-        }
-      }
-    });
   };
 
   // 处理建设验收状态变更
@@ -3120,59 +3165,15 @@ const CustomerList = () => {
   const handlePageSizeChange = (size: number) => {
     setPageSize(size);
     setCurrentPage(1); // 重置到第一页
-    // 使用排序后的数据计算总页数
-    setTotalPages(Math.ceil(sortedCustomers.length / size));
+    setTotalPages(Math.ceil(filteredCustomers.length / size));
   }
-  
-  // 计算排序后的数据
-  const sortedCustomers = useMemo(() => {
-    if (!sortField || !sortOrder) {
-      return filteredCustomers;
-    }
-    
-    const sortedData = [...filteredCustomers];
-    const direction = sortOrder === 'ascend' ? 1 : -1;
-    
-    sortedData.sort((a, b) => {
-      const aValue = a[sortField as keyof Customer];
-      const bValue = b[sortField as keyof Customer];
-      
-      if (aValue === undefined || aValue === null) return direction * -1;
-      if (bValue === undefined || bValue === null) return direction;
-      
-      if (typeof aValue === 'string' && typeof bValue === 'string') {
-        return direction * aValue.localeCompare(bValue);
-      } else if (aValue instanceof Date && bValue instanceof Date) {
-        return direction * (aValue.getTime() - bValue.getTime());
-      } else if (typeof aValue === 'number' && typeof bValue === 'number') {
-        return direction * (aValue - bValue);
-      }
-      
-      // 尝试转换为日期
-      if (typeof aValue === 'string' && typeof bValue === 'string') {
-        try {
-          const dateA = new Date(aValue);
-          const dateB = new Date(bValue);
-          if (!isNaN(dateA.getTime()) && !isNaN(dateB.getTime())) {
-            return direction * (dateA.getTime() - dateB.getTime());
-          }
-        } catch (e) {
-          // 如果日期解析失败，继续使用字符串比较
-        }
-      }
-      
-      return direction * String(aValue).localeCompare(String(bValue));
-    });
-    
-    return sortedData;
-  }, [filteredCustomers, sortField, sortOrder]);
   
   // 计算当前页显示的数据
   const paginatedCustomers = useMemo(() => {
     const startIndex = (currentPage - 1) * pageSize;
     const endIndex = startIndex + pageSize;
-    return sortedCustomers.slice(startIndex, endIndex);
-  }, [sortedCustomers, currentPage, pageSize]);
+    return filteredCustomers.slice(startIndex, endIndex);
+  }, [filteredCustomers, currentPage, pageSize]);
 
   // 修改handleSearch函数，用于按钮点击和Enter键触发搜索
   const handleSearch = (value: string) => {
@@ -3512,6 +3513,132 @@ const CustomerList = () => {
     }
   };
 
+  // 添加设计师选择单元格组件
+  const DesignerCell = ({ value, record }: { value: any; record: Customer }) => {
+    const editable = isEditing(record, 'designer');
+    const [hover, setHover] = useState(false);
+    
+    // 将设计师数据转换为Select选项格式
+    const designerOptions = designers.map(designer => ({
+      value: designer.name,
+      label: designer.name,
+      phone: designer.phone || ''
+    }));
+    
+    // 添加一个清空选项
+    designerOptions.unshift({
+      value: '',
+      label: '清空设计师',
+      phone: ''
+    });
+    
+    return editable ? (
+      <Form.Item
+        name="designer"
+        style={{ margin: 0 }}
+      >
+        <Select
+          placeholder="请选择设计师"
+          autoFocus
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          options={designerOptions}
+          onBlur={() => record.id ? saveEditedCell(record.id) : undefined}
+          onChange={(value, option) => {
+            // 如果选择了设计师，自动填充电话
+            if (value && typeof option === 'object' && 'phone' in option) {
+              editForm.setFieldsValue({ designer_phone: option.phone });
+            }
+          }}
+        />
+      </Form.Item>
+    ) : (
+      <div 
+        style={{ 
+          display: 'flex', 
+          alignItems: 'center',
+          padding: '4px 0',
+          borderRadius: 4,
+          cursor: editingCell === null ? 'pointer' : 'default',
+          background: hover ? '#f0f5ff' : 'transparent'
+        }}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        onClick={() => editingCell === null && edit(record, 'designer')}
+      >
+        <div style={{ flex: 1 }}>
+          {value ? (
+            <span>{value}</span>
+          ) : (
+            <span style={{ color: '#999' }}>-</span>
+          )}
+        </div>
+        {hover && editingCell === null && (
+          <Button 
+            type="text" 
+            size="small"
+            icon={<EditOutlined />}
+            onClick={() => edit(record, 'designer')}
+            style={{ padding: '0 4px' }}
+            title="编辑设计师"
+          />
+        )}
+      </div>
+    );
+  };
+  
+  // 添加设计师电话可编辑单元格
+  const DesignerPhoneCell = ({ value, record }: { value: any; record: Customer }) => {
+    const editable = isEditing(record, 'designer_phone');
+    const [hover, setHover] = useState(false);
+    
+    return editable ? (
+      <Form.Item
+        name="designer_phone"
+        style={{ margin: 0 }}
+      >
+        <Input 
+          placeholder="请输入设计师电话"
+          onPressEnter={() => record.id ? saveEditedCell(record.id) : undefined}
+          onBlur={() => record.id ? saveEditedCell(record.id) : undefined}
+        />
+      </Form.Item>
+    ) : (
+      <div 
+        style={{ 
+          display: 'flex', 
+          alignItems: 'center',
+          padding: '4px 0',
+          borderRadius: 4,
+          cursor: editingCell === null ? 'pointer' : 'default',
+          background: hover ? '#f0f5ff' : 'transparent'
+        }}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        onClick={() => editingCell === null && edit(record, 'designer_phone')}
+      >
+        <div style={{ flex: 1 }}>
+          {value ? (
+            <span>{value}</span>
+          ) : (
+            <span style={{ color: '#999' }}>-</span>
+          )}
+        </div>
+        {hover && editingCell === null && (
+          <Button 
+            type="text" 
+            size="small"
+            icon={<EditOutlined />}
+            onClick={() => edit(record, 'designer_phone')}
+            style={{ padding: '0 4px' }}
+            title="编辑设计师电话"
+          />
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="customer-list-container" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {renderTitleBar()}
@@ -3530,15 +3657,6 @@ const CustomerList = () => {
             tableLayout="fixed"
             size="middle"
             bordered
-            onChange={(pagination, filters, sorter) => {
-              if (sorter && 'field' in sorter) {
-                setSortField(sorter.field as string);
-                setSortOrder(sorter.order);
-              } else {
-                setSortField('');
-                setSortOrder(undefined);
-              }
-            }}
           />
         </div>
         

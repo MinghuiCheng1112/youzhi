@@ -324,40 +324,8 @@ const CustomerForm = () => {
   // 上传国网按钮操作
   const handleUploadToGrid = () => {
     const currentValue = form.getFieldValue('upload_to_grid')
-    
-    // 显示日期选择器对话框
-    Modal.confirm({
-      title: '上传国网',
-      content: (
-        <div>
-          <p>请选择上传国网日期：</p>
-          <DatePicker 
-            defaultValue={currentValue ? dayjs(currentValue) : dayjs()}
-            onChange={(date) => {
-              if (date) {
-                // 存储临时日期值
-                (window as any).tempUploadDate = date.format();
-              }
-            }}
-            style={{ width: '100%' }}
-          />
-        </div>
-      ),
-      okText: '确认',
-      cancelText: '取消',
-      onOk() {
-        // 使用临时存储的日期或当前日期
-        const dateStr = (window as any).tempUploadDate || new Date().toISOString();
-        form.setFieldsValue({ upload_to_grid: dateStr });
-        // 清除临时存储
-        delete (window as any).tempUploadDate;
-      },
-      onCancel() {
-        // 如果当前有值且用户取消，则保持原值
-        // 清除临时存储
-        delete (window as any).tempUploadDate;
-      },
-    });
+    const newValue = currentValue ? null : new Date().toISOString()
+    form.setFieldsValue({ upload_to_grid: newValue })
   }
 
   // 建设验收按钮操作
@@ -371,72 +339,29 @@ const CustomerForm = () => {
   const handleMeterInstallation = () => {
     const currentValue = form.getFieldValue('meter_installation_date')
     
-    // 判断是否为异常状态
-    if (currentValue === 'abnormal') {
-      // 如果是异常状态，显示确认对话框
+    // 如果已有时间戳，则清除
+    if (currentValue) {
+      form.setFieldsValue({ meter_installation_date: null })
+      
+      // 显示选择对话框
       Modal.confirm({
-        title: '更新挂表状态',
-        content: '当前为发电异常状态，是否更新为已挂表状态？',
-        okText: '确认',
-        cancelText: '取消',
+        title: '请选择操作',
+        content: '请选择下一步操作',
+        okText: '挂表',
+        cancelText: '发电异常',
         onOk() {
-          // 显示日期选择对话框
-          showMeterDatePicker(currentValue);
-        }
+          // 不做任何操作，保持为挂表按钮
+        },
+        onCancel() {
+          // 设置为发电异常状态
+          form.setFieldsValue({ meter_installation_date: 'abnormal' })
+        },
       });
     } else {
-      // 非异常状态，直接显示日期选择对话框
-      showMeterDatePicker(currentValue);
+      // 如果当前为空或异常状态，点击后变为时间戳
+      const newValue = new Date().toISOString()
+      form.setFieldsValue({ meter_installation_date: newValue })
     }
-  }
-
-  // 显示挂表日期选择器
-  const showMeterDatePicker = (currentValue: string | null) => {
-    Modal.confirm({
-      title: '挂表日期',
-      content: (
-        <div>
-          <p>请选择挂表日期：</p>
-          <DatePicker 
-            defaultValue={currentValue && currentValue !== 'abnormal' ? dayjs(currentValue) : dayjs()}
-            onChange={(date) => {
-              if (date) {
-                // 存储临时日期值
-                (window as any).tempMeterDate = date.format();
-              }
-            }}
-            style={{ width: '100%' }}
-          />
-          <div style={{ marginTop: '10px' }}>
-            <Button 
-              danger 
-              style={{ width: '100%' }}
-              onClick={() => {
-                // 设置为发电异常状态并关闭对话框
-                form.setFieldsValue({ meter_installation_date: 'abnormal' });
-                Modal.destroyAll();
-              }}
-            >
-              标记为发电异常
-            </Button>
-          </div>
-        </div>
-      ),
-      okText: '确认',
-      cancelText: '取消',
-      onOk() {
-        // 使用临时存储的日期或当前日期
-        const dateStr = (window as any).tempMeterDate || new Date().toISOString();
-        form.setFieldsValue({ meter_installation_date: dateStr });
-        // 清除临时存储
-        delete (window as any).tempMeterDate;
-      },
-      onCancel() {
-        // 如果用户取消，保持原值
-        // 清除临时存储
-        delete (window as any).tempMeterDate;
-      },
-    });
   }
 
   // 购售电合同按钮操作
@@ -519,6 +444,7 @@ const CustomerForm = () => {
       'station_management', // 补充资料
       'meter_number',   // 电表号码
       'designer',       // 设计师
+      'designer_phone', // 设计师电话
       'remarks',        // 备注
       'drawing_change'  // 图纸变更
     ].includes(fieldName)
@@ -678,6 +604,15 @@ const CustomerForm = () => {
               label="设计师"
             >
               <Input disabled={!canSurveyorEdit('designer')} />
+            </Form.Item>
+          </Col>
+          
+          <Col xs={24} sm={12} md={8}>
+            <Form.Item
+              name="designer_phone"
+              label="设计师电话"
+            >
+              <Input disabled={!canSurveyorEdit('designer_phone')} />
             </Form.Item>
           </Col>
           
