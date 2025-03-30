@@ -39,78 +39,61 @@ console.log('正在连接到:', `postgresql://${connectionConfig.user}:****@${co
 // 创建连接池
 const pool = new Pool(connectionConfig);
 
-// 测试连接并执行初始查询
 async function testConnection() {
+  let client;
   try {
-    // 测试连接
-    const client = await pool.connect();
+    client = await pool.connect();
     console.log('成功连接到Supabase PostgreSQL数据库！');
     
-    // 执行一些基本查询以验证连接
-    const result = await client.query('SELECT current_database() as db, current_user as user, version() as version');
+    // 获取数据库信息
+    const dbInfo = await client.query(`
+      SELECT current_database() as db, 
+             current_user as user, 
+             version() as version
+    `);
     console.log('\n数据库连接信息:');
-    console.table(result.rows);
+    console.table(dbInfo.rows);
     
-    // 显示公共表
-    const tablesResult = await client.query(`
-      SELECT 
-        table_name,
-        (SELECT count(*) FROM information_schema.columns WHERE table_name = t.table_name) as column_count
-      FROM 
-        information_schema.tables t
-      WHERE 
-        table_schema = 'public'
-        AND table_type = 'BASE TABLE'
-      ORDER BY 
-        table_name
+    // 获取可用表信息
+    const tablesInfo = await client.query(`
+      SELECT table_name, COUNT(column_name)::text as column_count
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+      GROUP BY table_name
+      ORDER BY table_name
     `);
-    
     console.log('\n可用的公共表:');
-    if (tablesResult.rows.length > 0) {
-      console.table(tablesResult.rows);
-    } else {
-      console.log('未找到公共表');
-    }
+    console.table(tablesInfo.rows);
     
-    // 显示视图
-    const viewsResult = await client.query(`
-      SELECT 
-        table_name as view_name
-      FROM 
-        information_schema.views
-      WHERE 
-        table_schema = 'public'
-      ORDER BY 
-        table_name
+    // 获取可用视图信息
+    const viewsInfo = await client.query(`
+      SELECT table_name as view_name
+      FROM information_schema.views
+      WHERE table_schema = 'public'
+      ORDER BY table_name
     `);
+    console.log('\n可用的公共视图:');
+    console.table(viewsInfo.rows);
     
-    if (viewsResult.rows.length > 0) {
-      console.log('\n可用的公共视图:');
-      console.table(viewsResult.rows);
-    }
-    
-    // 显示RLS策略
-    const rlsResult = await client.query(`
-      SELECT 
-        tablename,
-        policyname,
-        permissive,
-        roles,
-        cmd
-      FROM 
-        pg_policies
-      WHERE 
-        schemaname = 'public'
-      ORDER BY 
-        tablename, policyname
+    // 获取行级安全策略信息
+    const rls = await client.query(`
+      SELECT tablename, policyname, permissive, roles, cmd
+      FROM pg_policies
+      WHERE schemaname = 'public'
+      ORDER BY tablename, policyname
     `);
+    console.log('\n行级安全策略:');
+    console.table(rls.rows);
     
-    if (rlsResult.rows.length > 0) {
-      console.log('\n行级安全策略:');
-      console.table(rlsResult.rows);
-    }
-    
-    client.release();
+    // 查询customers表数据
+    console.log('\n查询customers表最新10条数据:');
+    const customersData = await client.query(`
+      SELECT id, customer_name, phone, address, register_date
+      FROM customers
+      ORDER BY register_date DESC
+      LIMIT 10
+    `);
+    console.table(customersData.rows);
     
     console.log('\n您已成功连接到Supabase PostgreSQL数据库！');
     console.log('在Cursor中，您可以：');
@@ -118,18 +101,21 @@ async function testConnection() {
     console.log('2. 执行"node scripts/view-db-structure.mjs"查看完整数据库结构');
     console.log('3. 执行"node scripts/run-query.js"运行自定义SQL查询');
     
-    // 脚本完成后关闭连接池
-    await pool.end();
-    
   } catch (err) {
-    console.error('连接数据库失败:', err.message);
-    try {
-      await pool.end();
-    } catch (closeErr) {
-      console.error('关闭连接池失败:', closeErr.message);
+    console.error('连接或查询出错:', err);
+  } finally {
+    if (client) {
+      client.release();
     }
-    process.exit(1);
   }
 }
 
+process.on('SIGINT', async () => {
+  console.log('正在关闭连接池...');
+  await pool.end();
+  console.log('连接池已关闭');
+  process.exit(0);
+});
+
+// 执行测试连接
 testConnection(); 

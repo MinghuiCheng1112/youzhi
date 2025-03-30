@@ -485,10 +485,6 @@ const CustomerList = () => {
           updateData.capacity = null;
           updateData.investment_amount = null;
           updateData.land_area = null;
-          updateData.inverter = null;
-          updateData.copper_wire = null;
-          updateData.aluminum_wire = null;
-          updateData.distribution_box = null;
           console.log('将module_count及相关字段的值转换为null');
         } else if (typeof moduleCountValue === 'string') {
           // 如果是字符串，尝试转换为数字
@@ -507,10 +503,6 @@ const CustomerList = () => {
               updateData.capacity = null;
               updateData.investment_amount = null;
               updateData.land_area = null;
-              updateData.inverter = null;
-              updateData.copper_wire = null;
-              updateData.aluminum_wire = null;
-              updateData.distribution_box = null;
               console.log('组件数量为0，相关字段设置为null');
               }
             } else {
@@ -519,10 +511,6 @@ const CustomerList = () => {
             updateData.capacity = null;
             updateData.investment_amount = null;
             updateData.land_area = null;
-            updateData.inverter = null;
-            updateData.copper_wire = null;
-            updateData.aluminum_wire = null;
-            updateData.distribution_box = null;
             console.log('将module_count无效字符串及相关字段转换为null:', moduleCountValue);
           }
         } else if (typeof moduleCountValue === 'number') {
@@ -536,10 +524,6 @@ const CustomerList = () => {
             updateData.capacity = null;
             updateData.investment_amount = null;
             updateData.land_area = null;
-            updateData.inverter = null;
-            updateData.copper_wire = null;
-            updateData.aluminum_wire = null;
-            updateData.distribution_box = null;
             console.log('组件数量为0或NaN，相关字段设置为null');
           }
         }
