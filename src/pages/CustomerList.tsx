@@ -515,11 +515,66 @@ const CustomerList = () => {
           if (teamInfo && teamInfo.phone) {
             updateData.construction_team_phone = teamInfo.phone;
             console.log('根据施工队名称自动设置电话:', teamInfo.phone);
-            
-            // 更新所有使用相同施工队名称的记录，确保电话号码一致
-            if (teamInfo.phone && values.construction_team) {
-              updateAllSameTeamPhones(values.construction_team, teamInfo.phone);
-            }
+          }
+        } else {
+          // 如果施工队被清空，也清空施工队电话
+          updateData.construction_team_phone = null;
+          console.log('施工队被清空，同时清空施工队电话');
+        }
+      }
+      
+      // 如果编辑的是施工队电话字段，将新电话更新到具有相同施工队名称的所有记录
+      if (dataIndex === 'construction_team_phone') {
+        console.log('正在更新施工队电话:', values.construction_team_phone);
+      }
+      
+      // 如果编辑设计师字段，同时保存设计师电话
+      if (dataIndex === 'designer') {
+        console.log('正在保存设计师字段:', values[dataIndex]);
+        // 获取设计师电话并添加到更新数据中
+        if (values.designer_phone !== undefined) {
+          updateData.designer_phone = values.designer_phone;
+          console.log('同时更新设计师电话:', values.designer_phone);
+        } else if (values.designer) {
+          // 如果没有明确设置电话但选择了设计师，尝试从设计师列表找到对应电话
+          const designerInfo = designers.find(designer => designer.name === values.designer);
+          if (designerInfo && designerInfo.phone) {
+            updateData.designer_phone = designerInfo.phone;
+            console.log('根据设计师名称自动设置电话:', designerInfo.phone);
+          }
+        }
+      }
+      
+      // 如果编辑踏勘员字段，同时保存踏勘员电话
+      if (dataIndex === 'surveyor') {
+        console.log('正在保存踏勘员字段:', values[dataIndex]);
+        // 获取踏勘员电话并添加到更新数据中
+        if (values.surveyor_phone !== undefined) {
+          updateData.surveyor_phone = values.surveyor_phone;
+          console.log('同时更新踏勘员电话:', values.surveyor_phone);
+        } else if (values.surveyor) {
+          // 如果没有明确设置电话但选择了踏勘员，尝试从踏勘员列表找到对应电话
+          const surveyorInfo = surveyors.find(surveyor => surveyor.name === values.surveyor);
+          if (surveyorInfo && surveyorInfo.phone) {
+            updateData.surveyor_phone = surveyorInfo.phone;
+            console.log('根据踏勘员名称自动设置电话:', surveyorInfo.phone);
+          }
+        }
+      }
+      
+      // 如果编辑业务员字段，同时保存业务员电话
+      if (dataIndex === 'salesman') {
+        console.log('正在保存业务员字段:', values[dataIndex]);
+        // 获取业务员电话并添加到更新数据中
+        if (values.salesman_phone !== undefined) {
+          updateData.salesman_phone = values.salesman_phone;
+          console.log('同时更新业务员电话:', values.salesman_phone);
+        } else if (values.salesman) {
+          // 如果没有明确设置电话但选择了业务员，尝试从业务员列表找到对应电话
+          const salesmanInfo = salesmenList.find(salesman => salesman.name === values.salesman);
+          if (salesmanInfo && salesmanInfo.phone) {
+            updateData.salesman_phone = salesmanInfo.phone;
+            console.log('根据业务员名称自动设置电话:', salesmanInfo.phone);
           }
         }
       }
@@ -617,6 +672,206 @@ const CustomerList = () => {
       
       // 显示成功消息
       message.success('数据已更新');
+      
+      // 如果编辑的是施工队电话，自动更新所有相同施工队名称的记录
+      if (dataIndex === 'construction_team_phone') {
+        const currentCustomer = customers.find(customer => customer.id === id);
+        if (currentCustomer && currentCustomer.construction_team && values.construction_team_phone) {
+          const teamName = currentCustomer.construction_team;
+          const newPhone = values.construction_team_phone;
+          console.log(`准备更新所有施工队 "${teamName}" 的电话为 ${newPhone}`);
+          
+          // 找到所有具有相同施工队名称的记录
+          const recordsToUpdate = customers.filter(
+            c => c.id !== id && c.construction_team === teamName
+          );
+          
+          if (recordsToUpdate.length > 0) {
+            console.log(`找到 ${recordsToUpdate.length} 条需要更新电话的记录`);
+            
+            // 批量更新这些记录
+            const updatePromises = recordsToUpdate.map(customer => {
+              return customerApi.updateWithCache(customer.id, {
+                construction_team_phone: newPhone
+              });
+            });
+            
+            // 等待所有更新完成
+            await Promise.all(updatePromises);
+            
+            // 更新本地状态
+            setCustomers(prev => 
+              prev.map(customer => 
+                customer.construction_team === teamName
+                  ? { ...customer, construction_team_phone: newPhone }
+                  : customer
+              )
+            );
+            
+            setFilteredCustomers(prev => 
+              prev.map(customer => 
+                customer.construction_team === teamName
+                  ? { ...customer, construction_team_phone: newPhone }
+                  : customer
+              )
+            );
+            
+            message.success(`已自动更新所有"${teamName}"的电话号码`);
+          } else {
+            console.log('没有找到其他需要更新电话的相同施工队记录');
+          }
+        }
+      }
+      
+      // 如果编辑的是设计师电话，自动更新所有相同设计师名称的记录
+      if (dataIndex === 'designer_phone') {
+        const currentCustomer = customers.find(customer => customer.id === id);
+        if (currentCustomer && currentCustomer.designer && values.designer_phone) {
+          const designerName = currentCustomer.designer;
+          const newPhone = values.designer_phone;
+          console.log(`准备更新所有设计师 "${designerName}" 的电话为 ${newPhone}`);
+          
+          // 找到所有具有相同设计师名称的记录
+          const recordsToUpdate = customers.filter(
+            c => c.id !== id && c.designer === designerName
+          );
+          
+          if (recordsToUpdate.length > 0) {
+            console.log(`找到 ${recordsToUpdate.length} 条需要更新电话的记录`);
+            
+            // 批量更新这些记录
+            const updatePromises = recordsToUpdate.map(customer => {
+              return customerApi.updateWithCache(customer.id, {
+                designer_phone: newPhone
+              });
+            });
+            
+            // 等待所有更新完成
+            await Promise.all(updatePromises);
+            
+            // 更新本地状态
+            setCustomers(prev => 
+              prev.map(customer => 
+                customer.designer === designerName
+                  ? { ...customer, designer_phone: newPhone }
+                  : customer
+              )
+            );
+            
+            setFilteredCustomers(prev => 
+              prev.map(customer => 
+                customer.designer === designerName
+                  ? { ...customer, designer_phone: newPhone }
+                  : customer
+              )
+            );
+            
+            message.success(`已自动更新所有"${designerName}"的电话号码`);
+          } else {
+            console.log('没有找到其他需要更新电话的相同设计师记录');
+          }
+        }
+      }
+      
+      // 如果编辑的是踏勘员电话，自动更新所有相同踏勘员名称的记录
+      if (dataIndex === 'surveyor_phone') {
+        const currentCustomer = customers.find(customer => customer.id === id);
+        if (currentCustomer && currentCustomer.surveyor && values.surveyor_phone) {
+          const surveyorName = currentCustomer.surveyor;
+          const newPhone = values.surveyor_phone;
+          console.log(`准备更新所有踏勘员 "${surveyorName}" 的电话为 ${newPhone}`);
+          
+          // 找到所有具有相同踏勘员名称的记录
+          const recordsToUpdate = customers.filter(
+            c => c.id !== id && c.surveyor === surveyorName
+          );
+          
+          if (recordsToUpdate.length > 0) {
+            console.log(`找到 ${recordsToUpdate.length} 条需要更新电话的记录`);
+            
+            // 批量更新这些记录
+            const updatePromises = recordsToUpdate.map(customer => {
+              return customerApi.updateWithCache(customer.id, {
+                surveyor_phone: newPhone
+              });
+            });
+            
+            // 等待所有更新完成
+            await Promise.all(updatePromises);
+            
+            // 更新本地状态
+            setCustomers(prev => 
+              prev.map(customer => 
+                customer.surveyor === surveyorName
+                  ? { ...customer, surveyor_phone: newPhone }
+                  : customer
+              )
+            );
+            
+            setFilteredCustomers(prev => 
+              prev.map(customer => 
+                customer.surveyor === surveyorName
+                  ? { ...customer, surveyor_phone: newPhone }
+                  : customer
+              )
+            );
+            
+            message.success(`已自动更新所有"${surveyorName}"的电话号码`);
+          } else {
+            console.log('没有找到其他需要更新电话的相同踏勘员记录');
+          }
+        }
+      }
+      
+      // 如果编辑的是业务员电话，自动更新所有相同业务员名称的记录
+      if (dataIndex === 'salesman_phone') {
+        const currentCustomer = customers.find(customer => customer.id === id);
+        if (currentCustomer && currentCustomer.salesman && values.salesman_phone) {
+          const salesmanName = currentCustomer.salesman;
+          const newPhone = values.salesman_phone;
+          console.log(`准备更新所有业务员 "${salesmanName}" 的电话为 ${newPhone}`);
+          
+          // 找到所有具有相同业务员名称的记录
+          const recordsToUpdate = customers.filter(
+            c => c.id !== id && c.salesman === salesmanName
+          );
+          
+          if (recordsToUpdate.length > 0) {
+            console.log(`找到 ${recordsToUpdate.length} 条需要更新电话的记录`);
+            
+            // 批量更新这些记录
+            const updatePromises = recordsToUpdate.map(customer => {
+              return customerApi.updateWithCache(customer.id, {
+                salesman_phone: newPhone
+              });
+            });
+            
+            // 等待所有更新完成
+            await Promise.all(updatePromises);
+            
+            // 更新本地状态
+            setCustomers(prev => 
+              prev.map(customer => 
+                customer.salesman === salesmanName
+                  ? { ...customer, salesman_phone: newPhone }
+                  : customer
+              )
+            );
+            
+            setFilteredCustomers(prev => 
+              prev.map(customer => 
+                customer.salesman === salesmanName
+                  ? { ...customer, salesman_phone: newPhone }
+                  : customer
+              )
+            );
+            
+            message.success(`已自动更新所有"${salesmanName}"的电话号码`);
+          } else {
+            console.log('没有找到其他需要更新电话的相同业务员记录');
+          }
+        }
+      }
     } catch (error) {
       console.error('保存编辑数据失败:', error);
       message.error('保存失败，请重试');
@@ -1857,7 +2112,7 @@ const CustomerList = () => {
       ellipsis: true,
       render: (value, record) => {
         console.log('渲染施工队字段:', record.id, value);
-        return <EditableCell value={value} record={record} dataIndex="construction_team" title="施工队" />;
+        return <EditableCell value={value} record={record} dataIndex="construction_team" title="施工队" required={false} />;
       }
     },
     {
@@ -3738,50 +3993,6 @@ const CustomerList = () => {
         )}
       </div>
     );
-  };
-
-  // 添加用于更新所有相同施工队电话的方法
-  const updateAllSameTeamPhones = async (teamName: string, phoneNumber: string) => {
-    try {
-      console.log(`正在更新所有名称为 "${teamName}" 的施工队电话为 ${phoneNumber}...`);
-      
-      // 使用supabase客户端更新相同名称的施工队电话
-      const { error } = await supabase
-        .from('customers')
-        .update({ 
-          construction_team_phone: phoneNumber,
-          updated_at: new Date().toISOString()
-        })
-        .eq('construction_team', teamName)
-        .neq('construction_team_phone', phoneNumber);
-      
-      if (error) {
-        console.error('更新相同名称施工队电话时出错:', error);
-      } else {
-        console.log(`成功更新所有 "${teamName}" 的电话号码`);
-        
-        // 更新本地状态
-        setCustomers(prev => 
-          prev.map(customer => 
-            customer.construction_team === teamName 
-              ? { ...customer, construction_team_phone: phoneNumber } 
-              : customer
-          )
-        );
-        
-        setFilteredCustomers(prev => 
-          prev.map(customer => 
-            customer.construction_team === teamName 
-              ? { ...customer, construction_team_phone: phoneNumber } 
-              : customer
-          )
-        );
-        
-        message.success(`已更新所有 "${teamName}" 的电话号码为 ${phoneNumber}`);
-      }
-    } catch (err) {
-      console.error('更新施工队电话时出错:', err);
-    }
   };
 
   return (
