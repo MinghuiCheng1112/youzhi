@@ -447,43 +447,33 @@ const CustomerList = () => {
 
   // 开始编辑单元格
   const edit = (record: Customer, dataIndex: string) => {
-    try {
-      if (!record.id) {
-        console.error("编辑错误: 无效的记录ID");
-        message.error("编辑失败: 无效的客户记录");
-        return;
-      }
+    console.log('开始编辑字段:', dataIndex, '客户ID:', record.id, '当前值:', record[dataIndex as keyof Customer]);
+    setEditingCell({ id: record.id, dataIndex });
+    
+    // 如果是编辑施工队，预先设置施工队电话到表单
+    if (dataIndex === 'construction_team') {
+      const currentTeam = record.construction_team;
+      const currentPhone = record.construction_team_phone;
+      console.log('编辑施工队:', currentTeam, '当前电话:', currentPhone);
       
-      // 特殊处理日期字段
-      if (dataIndex === 'register_date' || dataIndex === 'filing_date') {
-        const dateValue = record[dataIndex as keyof Customer];
-        let formattedDate = null;
-        
-        try {
-          if (dateValue && typeof dateValue === 'string') {
-            const date = dayjs(dateValue);
-            if (date.isValid()) {
-              formattedDate = date;
-            }
-          }
-        } catch (err) {
-          console.error(`日期解析错误: ${err}`);
-        }
-        
-        editForm.setFieldsValue({
-          [dataIndex]: formattedDate
-        });
-      } else {
-        // 处理其他字段
-        editForm.setFieldsValue({
-          [dataIndex]: record[dataIndex as keyof Customer] || ''
-        });
-      }
-      
-      setEditingCell({id: record.id, dataIndex});
-    } catch (error) {
-      console.error("编辑字段错误:", error);
-      message.error("编辑失败，请刷新页面重试");
+      // 用于防止电话覆盖
+      editForm.setFieldsValue({
+        construction_team: currentTeam,
+        construction_team_phone: currentPhone
+      });
+    }
+    
+    // 设置当前编辑字段的值到表单
+    editForm.setFieldsValue({
+      [dataIndex]: record[dataIndex as keyof Customer]
+    });
+    
+    // 针对特定字段的处理
+    if (dataIndex === 'salesman') {
+      // 同时设置业务员电话
+      editForm.setFieldsValue({
+        salesman_phone: record.salesman_phone
+      });
     }
   };
 
@@ -509,10 +499,28 @@ const CustomerList = () => {
       const updateData: any = {};
       
       // 添加被编辑的字段
-      updateData[editingCell.dataIndex] = values[editingCell.dataIndex];
+      const dataIndex = editingCell.dataIndex;
+      updateData[dataIndex] = values[dataIndex];
+      
+      // 如果编辑施工队字段，同时保存施工队电话
+      if (dataIndex === 'construction_team') {
+        console.log('正在保存施工队字段:', values[dataIndex]);
+        // 获取施工队电话并添加到更新数据中
+        if (values.construction_team_phone !== undefined) {
+          updateData.construction_team_phone = values.construction_team_phone;
+          console.log('同时更新施工队电话:', values.construction_team_phone);
+        } else if (values.construction_team) {
+          // 如果没有明确设置电话但选择了施工队，尝试从施工队列表找到对应电话
+          const teamInfo = constructionTeams.find(team => team.name === values.construction_team);
+          if (teamInfo && teamInfo.phone) {
+            updateData.construction_team_phone = teamInfo.phone;
+            console.log('根据施工队名称自动设置电话:', teamInfo.phone);
+          }
+        }
+      }
       
       // 特别处理module_count字段
-      if (editingCell.dataIndex === 'module_count') {
+      if (dataIndex === 'module_count') {
         const moduleCountValue = values.module_count;
         console.log('处理module_count值:', moduleCountValue, '类型:', typeof moduleCountValue);
         
@@ -568,7 +576,7 @@ const CustomerList = () => {
       }
       
       // 特殊处理图纸变更字段
-      if (editingCell.dataIndex === 'drawing_change') {
+      if (dataIndex === 'drawing_change') {
         if (values.drawing_change === undefined || values.drawing_change === '') {
           updateData.drawing_change = '无变更';
         }
@@ -578,7 +586,7 @@ const CustomerList = () => {
       console.log('将发送到API的更新数据:', updateData);
       
       // 使用缓存服务更新数据
-      const updatedCustomer = customerApi.updateWithCache(id, updateData);
+      customerApi.updateWithCache(id, updateData);
       
       // 查找当前编辑客户的索引
       const index = customers.findIndex(customer => customer.id === id);
@@ -588,6 +596,7 @@ const CustomerList = () => {
         // 更新本地状态
         const newCustomers = [...customers];
         newCustomers[index] = { ...newCustomers[index], ...updateData };
+        console.log('更新后的客户数据:', newCustomers[index]);
         setCustomers(newCustomers);
       }
       
@@ -1841,7 +1850,10 @@ const CustomerList = () => {
       key: 'construction_team',
       sorter: (a, b) => (a.construction_team || '').localeCompare(b.construction_team || ''),
       ellipsis: true,
-      render: (value, record) => <ConstructionTeamPhoneCell value={value} record={record} />
+      render: (value, record) => {
+        console.log('渲染施工队字段:', record.id, value);
+        return <EditableCell value={value} record={record} dataIndex="construction_team" title="施工队" />;
+      }
     },
     {
       title: '施工队电话',
@@ -1849,7 +1861,10 @@ const CustomerList = () => {
       key: 'construction_team_phone',
       sorter: (a, b) => (a.construction_team_phone || '').localeCompare(b.construction_team_phone || ''),
       ellipsis: true,
-      render: (value, record) => <ConstructionTeamPhoneCell value={value} record={record} />
+      render: (value, record) => {
+        console.log('渲染施工队电话字段:', record.id, value);
+        return <ConstructionTeamPhoneCell value={value} record={record} />;
+      }
     },
     {
       title: '施工状态',
@@ -2466,6 +2481,87 @@ const CustomerList = () => {
             onClick={() => edit(record, 'construction_team_phone')}
             style={{ padding: '0 4px' }}
             title="编辑施工队电话"
+          />
+        )}
+      </div>
+    );
+  };
+
+  // 创建施工队可编辑单元格
+  const ConstructionTeamCell = ({ value, record }: { value: any; record: Customer }) => {
+    const editable = isEditing(record, 'construction_team');
+    const [hover, setHover] = useState(false);
+    
+    // 将施工队数据转换为Select选项格式
+    const constructionTeamOptions = constructionTeams.map(team => ({
+      value: team.name,
+      label: team.name,
+      phone: team.phone || ''
+    }));
+    
+    // 添加一个清空选项
+    constructionTeamOptions.unshift({
+      value: '',
+      label: '清空施工队',
+      phone: ''
+    });
+    
+    console.log('渲染施工队单元格:', value);
+    
+    return editable ? (
+      <Form.Item
+        name="construction_team"
+        style={{ margin: 0 }}
+        initialValue={value}
+      >
+        <Select
+          placeholder="请选择施工队"
+          autoFocus
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          options={constructionTeamOptions}
+          onBlur={() => record.id ? saveEditedCell(record.id) : undefined}
+          onChange={(value, option) => {
+            // 如果选择了施工队，自动填充电话
+            if (value && typeof option === 'object' && 'phone' in option) {
+              editForm.setFieldsValue({ construction_team_phone: option.phone });
+            } else if (!value) {
+              // 如果清空了施工队，也清空电话
+              editForm.setFieldsValue({ construction_team_phone: '' });
+            }
+          }}
+        />
+      </Form.Item>
+    ) : (
+      <div 
+        style={{ 
+          display: 'flex', 
+          alignItems: 'center',
+          padding: '4px 0',
+          borderRadius: 4,
+          cursor: editingCell === null ? 'pointer' : 'default',
+          background: hover ? '#f0f5ff' : 'transparent'
+        }}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        onClick={() => editingCell === null && edit(record, 'construction_team')}
+      >
+        <div style={{ flex: 1 }}>
+          {value ? (
+            <span>{value}</span>
+          ) : (
+            <span style={{ color: '#999' }}>-</span>
+          )}
+        </div>
+        {hover && editingCell === null && (
+          <Button 
+            type="text" 
+            size="small"
+            icon={<EditOutlined />}
+            onClick={() => edit(record, 'construction_team')}
+            style={{ padding: '0 4px' }}
+            title="编辑施工队"
           />
         )}
       </div>
