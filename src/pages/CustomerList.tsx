@@ -515,6 +515,11 @@ const CustomerList = () => {
           if (teamInfo && teamInfo.phone) {
             updateData.construction_team_phone = teamInfo.phone;
             console.log('根据施工队名称自动设置电话:', teamInfo.phone);
+            
+            // 更新所有使用相同施工队名称的记录，确保电话号码一致
+            if (teamInfo.phone && values.construction_team) {
+              updateAllSameTeamPhones(values.construction_team, teamInfo.phone);
+            }
           }
         }
       }
@@ -3733,6 +3738,50 @@ const CustomerList = () => {
         )}
       </div>
     );
+  };
+
+  // 添加用于更新所有相同施工队电话的方法
+  const updateAllSameTeamPhones = async (teamName: string, phoneNumber: string) => {
+    try {
+      console.log(`正在更新所有名称为 "${teamName}" 的施工队电话为 ${phoneNumber}...`);
+      
+      // 使用supabase客户端更新相同名称的施工队电话
+      const { error } = await supabase
+        .from('customers')
+        .update({ 
+          construction_team_phone: phoneNumber,
+          updated_at: new Date().toISOString()
+        })
+        .eq('construction_team', teamName)
+        .neq('construction_team_phone', phoneNumber);
+      
+      if (error) {
+        console.error('更新相同名称施工队电话时出错:', error);
+      } else {
+        console.log(`成功更新所有 "${teamName}" 的电话号码`);
+        
+        // 更新本地状态
+        setCustomers(prev => 
+          prev.map(customer => 
+            customer.construction_team === teamName 
+              ? { ...customer, construction_team_phone: phoneNumber } 
+              : customer
+          )
+        );
+        
+        setFilteredCustomers(prev => 
+          prev.map(customer => 
+            customer.construction_team === teamName 
+              ? { ...customer, construction_team_phone: phoneNumber } 
+              : customer
+          )
+        );
+        
+        message.success(`已更新所有 "${teamName}" 的电话号码为 ${phoneNumber}`);
+      }
+    } catch (err) {
+      console.error('更新施工队电话时出错:', err);
+    }
   };
 
   return (
