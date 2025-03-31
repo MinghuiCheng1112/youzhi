@@ -25,6 +25,8 @@ import type { ColumnsType } from 'antd/es/table'
 import { calculateAllFields } from '../utils/calculationUtils'
 import Draggable from 'react-draggable'
 import { supabase } from '../services/supabase';
+// 导入异步数据库更新函数
+import { updateTechnicalReview, updateConstructionAcceptance } from '../scripts/async-update-fields.js'
 
 const { Title } = Typography
 const { confirm } = Modal
@@ -2915,16 +2917,26 @@ const CustomerList = () => {
         };
       }
       
-      // 使用数据缓存服务更新数据
-      customerApi.updateWithCache(id, updateObj);
-      
-      // 更新本地状态 - 使用传入的updateObj而非updatedCustomer，确保UI立即更新
+      // 立即更新本地状态，提高UI响应速度
       setCustomers(prev => 
         prev.map(customer => (customer.id === id ? { ...customer, ...updateObj } : customer))
       );
       setFilteredCustomers(prev => 
         prev.map(customer => (customer.id === id ? { ...customer, ...updateObj } : customer))
       );
+      
+      // 使用数据缓存服务更新数据
+      customerApi.updateWithCache(id, updateObj);
+      
+      // 异步推送到数据库，确保数据一致性
+      try {
+        // 这里不需要等待返回，异步推送到数据库
+        updateTechnicalReview(id, status).catch(error => {
+          console.error('异步更新技术审核状态失败:', error);
+        });
+      } catch (error) {
+        console.error('触发异步更新技术审核状态失败:', error);
+      }
       
       const statusText = 
         status === 'approved' ? '已通过技术审核' : 
@@ -3067,7 +3079,7 @@ const CustomerList = () => {
           construction_acceptance_notes: `等待中 - 设置于 ${now.format('YYYY-MM-DD HH:mm:ss')}`
         };
       } else {
-        // 如果未验收且没有设置等待天数，则标记为验收完成
+        // 如果未验收且没有设置等待天数，则标记为验收完成 - 立即标记为已推到
         updateObj = {
           construction_acceptance: now.toISOString(),
           construction_acceptance_date: now.toISOString(),
@@ -3075,16 +3087,36 @@ const CustomerList = () => {
         };
       }
       
-      // 使用数据缓存服务更新数据
-      customerApi.updateWithCache(id, updateObj);
-      
-      // 更新本地状态 - 使用updateObj而非updatedCustomer，确保UI立即更新
+      // 立即更新本地状态，提高UI响应速度
       setCustomers(prev => 
         prev.map(customer => (customer.id === id ? { ...customer, ...updateObj } : customer))
       );
       setFilteredCustomers(prev => 
         prev.map(customer => (customer.id === id ? { ...customer, ...updateObj } : customer))
       );
+      
+      // 使用数据缓存服务更新数据
+      customerApi.updateWithCache(id, updateObj);
+      
+      // 异步推送到数据库，确保数据一致性
+      try {
+        // 这里不需要等待返回，异步推送到数据库
+        if (currentStatus) {
+          updateConstructionAcceptance(id, 'reset').catch(error => {
+            console.error('异步更新建设验收状态失败:', error);
+          });
+        } else if (days) {
+          updateConstructionAcceptance(id, 'waiting', days).catch(error => {
+            console.error('异步更新建设验收状态失败:', error);
+          });
+        } else {
+          updateConstructionAcceptance(id, null).catch(error => {
+            console.error('异步更新建设验收状态失败:', error);
+          });
+        }
+      } catch (error) {
+        console.error('触发异步更新建设验收状态失败:', error);
+      }
       
       const successMsg = currentStatus ? '已重置验收状态' : 
                          days ? `已设置为等待 ${days} 天` : 
