@@ -26,7 +26,7 @@ import { calculateAllFields } from '../utils/calculationUtils'
 import Draggable from 'react-draggable'
 import { supabase } from '../services/supabase';
 // 导入异步数据库更新函数
-import { updateTechnicalReview, updateConstructionAcceptance } from '../scripts/async-update-fields.js'
+import { updateTechnicalReview, updateConstructionAcceptance } from '../scripts/async-update-fields'
 
 const { Title } = Typography
 const { confirm } = Modal
