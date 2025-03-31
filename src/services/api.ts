@@ -504,28 +504,112 @@ export const customerApi = {
   },
 
   /**
-   * 更新客户记录并同时更新缓存
+   * 使用缓存服务更新客户信息（前端立即更新，后台静默推送）
+   * 支持所有类型的字段更新
+   * @param {string} id - 客户ID
+   * @param {Partial<Customer>} updates - 更新的客户信息
+   * @returns {Customer} 更新后的客户对象（从缓存中获取）
    */
   updateWithCache: (id: string, updates: UpdateCustomerInput): Customer => {
-    try {
-      // 首先更新本地缓存
-      const cachedCustomer = dataCacheService.getCustomer(id);
-      if (cachedCustomer) {
-        const updatedCustomer = { ...cachedCustomer, ...updates, updated_at: new Date().toISOString() };
-        dataCacheService.addCustomer(updatedCustomer);
+    // 处理特殊字段类型
+    const processedUpdates = { ...updates };
+    
+    // 记录原始数据，帮助调试
+    console.log(`updateWithCache原始数据(ID: ${id}):`, JSON.stringify(processedUpdates));
+    
+    // 如果module_count为空值，同时将相关计算字段设置为空值
+    if ('module_count' in processedUpdates) {
+      const moduleCount = (processedUpdates as any).module_count;
+      if (moduleCount === null || moduleCount === undefined || 
+          moduleCount === '' || 
+          (typeof moduleCount === 'number' && (isNaN(moduleCount) || moduleCount <= 0))) {
+        // 确保module_count为null
+        (processedUpdates as any).module_count = null;
+        // 相关字段也设置为null
+        (processedUpdates as any).capacity = null;
+        (processedUpdates as any).investment_amount = null;
+        (processedUpdates as any).land_area = null;
+        console.log('updateWithCache: module_count为空值，相关计算字段也设置为null');
       }
-      
-      // 然后在后台更新数据库，直接返回缓存中的更新后对象
-      customerApi.update(id, updates).catch(error => {
-        console.error('后台更新客户数据失败:', error);
-      });
-      
-      // 返回缓存中的客户对象
-      return dataCacheService.getCustomer(id) as Customer;
-    } catch (error) {
-      console.error('更新客户缓存失败:', error);
-      throw error;
     }
+    
+    // 处理数字字段，确保空字符串转换为null
+    const numberFields = ['module_count', 'capacity', 'investment_amount', 'land_area', 'price'];
+    numberFields.forEach(field => {
+      if (field in processedUpdates) {
+        const value = (processedUpdates as any)[field];
+        
+        // 记录更详细的类型信息
+        console.log(`updateWithCache处理${field}字段，原始值:`, value, `类型:`, typeof value);
+        
+        // 更严格地处理各种空值情况
+        if (value === '' || value === undefined || value === null || 
+            (typeof value === 'string' && value.trim() === '') || 
+            (typeof value === 'number' && isNaN(value))) {
+          (processedUpdates as any)[field] = null;
+          console.log(`updateWithCache将${field}字段的空值转换为null`);
+        } 
+        // 处理可能是数字的字符串
+        else if (typeof value === 'string' && value.trim() !== '') {
+          // 尝试将非空字符串转换为数字
+          const numValue = Number(value);
+          if (!isNaN(numValue)) {
+            (processedUpdates as any)[field] = numValue;
+            console.log(`updateWithCache将${field}字段的字符串值转换为数字: ${value} -> ${numValue}`);
+          } else {
+            // 如果转换失败，设置为null
+            (processedUpdates as any)[field] = null;
+            console.log(`updateWithCache将${field}字段的无效数字字符串值转换为null: ${value}`);
+          }
+        }
+      }
+    });
+    
+    // 处理日期字段
+    const dateFields = ['register_date', 'filing_date', 'dispatch_date', 'meter_installation_date'];
+    dateFields.forEach(field => {
+      if (field in processedUpdates && processedUpdates[field as keyof UpdateCustomerInput]) {
+        const dateValue = processedUpdates[field as keyof UpdateCustomerInput];
+        if (dateValue && typeof dateValue === 'object' && 'toISOString' in dateValue) {
+          // 如果是日期对象，转换为ISO字符串
+          (processedUpdates as any)[field] = (dateValue as unknown as { toISOString(): string }).toISOString();
+        }
+      }
+    });
+    
+    // 处理布尔字段，确保正确转换
+    // construction_status字段特殊处理，它实际上是一个日期字符串或null，而不是布尔值
+    const boolFields = ['construction_acceptance', 'technical_review'];
+    boolFields.forEach(field => {
+      if (field in processedUpdates) {
+        const boolValue = processedUpdates[field as keyof UpdateCustomerInput];
+        if (typeof boolValue === 'string') {
+          // 转换字符串到布尔值
+          (processedUpdates as any)[field] = boolValue.toLowerCase() === 'true';
+        }
+      }
+    });
+    
+    // 特殊处理construction_status字段，确保它是日期字符串或null
+    if ('construction_status' in processedUpdates) {
+      const value = processedUpdates['construction_status' as keyof UpdateCustomerInput];
+      console.log(`处理construction_status字段，原始值:`, value, `类型:`, typeof value);
+      
+      // 如果是空值，设置为null
+      if (value === '' || value === undefined || value === false) {
+        (processedUpdates as any)['construction_status'] = null;
+      } 
+      // 如果是true，转换为当前时间的ISO字符串
+      else if (value === true) {
+        (processedUpdates as any)['construction_status'] = new Date().toISOString();
+      }
+      // 其他情况保持原值(应该是日期字符串或null)
+    }
+    
+    // 记录最终将发送到数据缓存的数据
+    console.log(`updateWithCache最终处理后的数据(ID: ${id}):`, JSON.stringify(processedUpdates));
+    
+    return dataCacheService.updateCustomer(id, processedUpdates);
   },
 
   /**
