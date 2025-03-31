@@ -1,3 +1,5 @@
+export type OutboundStatus = 'none' | 'outbound' | 'inbound' | 'returned';
+
 export interface Customer {
   id: string;
   customer_name: string;
@@ -6,6 +8,10 @@ export interface Customer {
   register_date: string;
   square_steel_outbound_date?: string | null;
   component_outbound_date?: string | null;
+  square_steel_inbound_date?: string | null;
+  component_inbound_date?: string | null;
+  square_steel_status?: OutboundStatus;
+  component_status?: OutboundStatus;
   outbound_date?: string | null;
   dispatch_date?: string | null;
   construction_status?: string | null;
@@ -16,6 +22,7 @@ export interface Customer {
   designer?: string | null;
   designer_phone?: string | null;
   salesman?: string | null;
+  salesman_phone?: string | null;
   module_count?: number;
   capacity?: number;
   status?: string;
@@ -26,6 +33,7 @@ export interface Customer {
   inverter_serial?: string;
   main_line?: string;
   construction_notes?: string;
+  station_management?: string[] | string;
 }
 
 export interface ImportResult {

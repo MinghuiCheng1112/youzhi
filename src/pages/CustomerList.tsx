@@ -21,7 +21,7 @@ import * as XLSX from 'xlsx'
 import { useAuth } from '../contexts/AuthContext'
 import dayjs from 'dayjs'
 import type { UploadProps } from 'antd'
-import type { ColumnsType } from 'antd/es/table'
+import type { ColumnsType, ColumnType } from 'antd/es/table'
 import { calculateAllFields } from '../utils/calculationUtils'
 import Draggable from 'react-draggable'
 import { supabase } from '../services/supabase';
@@ -30,7 +30,7 @@ const { Title } = Typography
 const { confirm } = Modal
 const { Dragger } = Upload
 
-// 更新出库状态类型定义
+// 手动定义OutboundStatus类型
 type OutboundStatus = 'none' | 'outbound' | 'inbound' | 'returned';
 
 const CustomerList = () => {
@@ -1667,6 +1667,23 @@ const CustomerList = () => {
           options={STATION_MANAGEMENT_OPTIONS}
         />
       ),
+      sorter: (a, b) => {
+        // 处理station_management可能是string或string[]的情况
+        const aArray = Array.isArray(a.station_management) ? a.station_management : 
+                     (a.station_management ? [a.station_management] : []);
+        const bArray = Array.isArray(b.station_management) ? b.station_management : 
+                     (b.station_management ? [b.station_management] : []);
+        
+        // 首先按数量排序
+        if (aArray.length !== bArray.length) {
+          return aArray.length - bArray.length;
+        }
+        
+        // 如果数量相同，按内容排序
+        const aStr = aArray.join(',');
+        const bStr = bArray.join(',');
+        return aStr.localeCompare(bStr);
+      },
       ellipsis: true,
     },
     {
@@ -2029,6 +2046,40 @@ const CustomerList = () => {
             </Button>
           );
         }
+      },
+      sorter: (a: Customer, b: Customer) => {
+        // 状态优先级：none(未出库) < outbound(已出库) < inbound(已回库) < returned(退单)
+        const statusPriority: Record<OutboundStatus, number> = {
+          'none': 0,
+          'outbound': 1,
+          'inbound': 2,
+          'returned': 3
+        };
+        
+        const aStatus = a.square_steel_status || 'none';
+        const bStatus = b.square_steel_status || 'none';
+        
+        // 首先按状态优先级排序
+        if (statusPriority[aStatus] !== statusPriority[bStatus]) {
+          return statusPriority[aStatus] - statusPriority[bStatus];
+        }
+        
+        // 如果状态相同且都是出库状态，按出库日期排序
+        if (aStatus === 'outbound' && bStatus === 'outbound') {
+          const aDate = a.square_steel_outbound_date ? new Date(a.square_steel_outbound_date).getTime() : 0;
+          const bDate = b.square_steel_outbound_date ? new Date(b.square_steel_outbound_date).getTime() : 0;
+          return aDate - bDate;
+        }
+        
+        // 如果状态相同且都是回库状态，按回库日期排序
+        if (aStatus === 'inbound' && bStatus === 'inbound') {
+          const aDate = a.square_steel_inbound_date ? new Date(a.square_steel_inbound_date).getTime() : 0;
+          const bDate = b.square_steel_inbound_date ? new Date(b.square_steel_inbound_date).getTime() : 0;
+          return aDate - bDate;
+        }
+        
+        // 其他情况返回0
+        return 0;
       }
     },
     {
@@ -2089,6 +2140,40 @@ const CustomerList = () => {
             </Button>
           );
         }
+      },
+      sorter: (a: Customer, b: Customer) => {
+        // 状态优先级：none(未出库) < outbound(已出库) < inbound(已回库) < returned(退单)
+        const statusPriority: Record<OutboundStatus, number> = {
+          'none': 0,
+          'outbound': 1,
+          'inbound': 2,
+          'returned': 3
+        };
+        
+        const aStatus = a.component_status || 'none';
+        const bStatus = b.component_status || 'none';
+        
+        // 首先按状态优先级排序
+        if (statusPriority[aStatus] !== statusPriority[bStatus]) {
+          return statusPriority[aStatus] - statusPriority[bStatus];
+        }
+        
+        // 如果状态相同且都是出库状态，按出库日期排序
+        if (aStatus === 'outbound' && bStatus === 'outbound') {
+          const aDate = a.component_outbound_date ? new Date(a.component_outbound_date).getTime() : 0;
+          const bDate = b.component_outbound_date ? new Date(b.component_outbound_date).getTime() : 0;
+          return aDate - bDate;
+        }
+        
+        // 如果状态相同且都是回库状态，按回库日期排序
+        if (aStatus === 'inbound' && bStatus === 'inbound') {
+          const aDate = a.component_inbound_date ? new Date(a.component_inbound_date).getTime() : 0;
+          const bDate = b.component_inbound_date ? new Date(b.component_inbound_date).getTime() : 0;
+          return aDate - bDate;
+        }
+        
+        // 其他情况返回0
+        return 0;
       }
     },
     {
@@ -4013,6 +4098,59 @@ const CustomerList = () => {
             tableLayout="fixed"
             size="middle"
             bordered
+            onChange={(pagination, filters, sorter) => {
+              // 处理排序，确保所有客户都参与排序
+              if (sorter && !Array.isArray(sorter)) {
+                const { field, order } = sorter;
+                if (field && order) {
+                  // 应用排序到所有filteredCustomers数据
+                  const sortFunc = (a: Customer, b: Customer) => {
+                    // 为field创建类型安全的访问
+                    const fieldKey = field as keyof Customer;
+                    
+                    // 找到对应的列定义
+                    const column = columns.find(col => {
+                      if (typeof col.key === 'string' && col.key === field) return true;
+                      if ('dataIndex' in col && col.dataIndex === field) return true;
+                      return false;
+                    });
+                    
+                    // 如果列有自定义排序函数，使用它
+                    if (column && 'sorter' in column && typeof column.sorter === 'function') {
+                      const result = column.sorter(a, b);
+                      return order === 'ascend' ? result : -result;
+                    }
+                    
+                    // 否则使用默认排序逻辑
+                    const aValue = a[fieldKey];
+                    const bValue = b[fieldKey];
+                    
+                    if (aValue === bValue) return 0;
+                    if (aValue === undefined || aValue === null) return order === 'ascend' ? -1 : 1;
+                    if (bValue === undefined || bValue === null) return order === 'ascend' ? 1 : -1;
+                    
+                    if (typeof aValue === 'string' && typeof bValue === 'string') {
+                      return order === 'ascend' 
+                        ? aValue.localeCompare(bValue) 
+                        : bValue.localeCompare(aValue);
+                    }
+                    
+                    if (typeof aValue === 'number' && typeof bValue === 'number') {
+                      return order === 'ascend' ? aValue - bValue : bValue - aValue;
+                    }
+                    
+                    return 0;
+                  };
+                  
+                  // 排序数据
+                  const sortedData = [...filteredCustomers].sort(sortFunc);
+                  
+                  // 更新排序后的数据
+                  setFilteredCustomers(sortedData);
+                  setCurrentPage(1); // 重置到第一页
+                }
+              }
+            }}
           />
         </div>
         

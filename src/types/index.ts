@@ -1,3 +1,6 @@
+// 更新出库状态类型定义
+export type OutboundStatus = 'none' | 'outbound' | 'inbound' | 'returned';
+
 // 客户信息类型定义
 export interface Customer {
   id: string
@@ -28,6 +31,10 @@ export interface Customer {
   distribution_box: string // 配电箱
   square_steel_outbound_date: string | null // 方钢出库日期
   component_outbound_date: string | null // 组件出库日期
+  square_steel_inbound_date: string | null // 方钢回库日期
+  component_inbound_date: string | null // 组件回库日期
+  square_steel_status: OutboundStatus | null // 方钢状态
+  component_status: OutboundStatus | null // 组件状态
   dispatch_date: string | null // 派工日期
   construction_team: string | null // 施工队
   construction_team_phone: string | null // 施工队电话
