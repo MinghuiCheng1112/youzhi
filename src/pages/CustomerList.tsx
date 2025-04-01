@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
-import { Table, Button, Input, Space, message, Modal, Tag, Tooltip, Typography, Upload, Drawer, Divider, Select, DatePicker, Form, Radio, InputNumber, Dropdown, Menu } from 'antd'
+import { Table, Button, Input, Space, message, Modal, Tag, Tooltip, Typography, Upload, Drawer, Divider, Select, DatePicker, Form, Radio, InputNumber, Dropdown, Menu, AutoComplete } from 'antd'
 import { 
   PlusOutlined, 
   SearchOutlined, 
@@ -60,7 +60,8 @@ const CustomerList = () => {
     { value: '航拍', label: '航拍', color: 'green' },
     { value: '结构照', label: '结构照', color: 'magenta' },
     { value: '门头照', label: '门头照', color: 'orange' },
-    { value: '合同', label: '合同', color: 'red' }
+    { value: '合同', label: '合同', color: 'red' },
+    { value: '日期', label: '日期', color: 'cyan' }
   ];
 
   // 定义图纸变更选项
@@ -284,11 +285,8 @@ const CustomerList = () => {
       console.error('获取施工队列表失败:', error);
       message.error('获取施工队列表失败');
       
-      // 发生错误时使用默认值
-      setConstructionTeams([
-        { name: '北城施工队', phone: '13800138001' },
-        { name: '西城施工队', phone: '13800138002' }
-      ]);
+      // 发生错误时使用空数组
+      setConstructionTeams([]);
     }
   };
 
@@ -335,19 +333,13 @@ const CustomerList = () => {
       
       // 如果所有渠道都没有数据，使用默认值
       console.log('所有渠道都没有数据，使用默认踏勘员数据');
-      setSurveyors([
-        { name: '李踏勘', phone: '13900139001' },
-        { name: '王踏勘', phone: '13900139002' }
-      ]);
+      setSurveyors([]);
     } catch (error) {
       console.error('获取踏勘员列表失败:', error);
       message.error('获取踏勘员列表失败');
       
-      // 发生错误时使用默认值
-      setSurveyors([
-        { name: '李踏勘', phone: '13900139001' },
-        { name: '王踏勘', phone: '13900139002' }
-      ]);
+      // 发生错误时使用空数组
+      setSurveyors([]);
     }
   };
 
@@ -639,6 +631,24 @@ const CustomerList = () => {
       if (dataIndex === 'drawing_change') {
         if (values.drawing_change === undefined || values.drawing_change === '') {
           updateData.drawing_change = '无变更';
+        }
+      }
+      
+      // 处理补充资料字段中的"日期"选项
+      if (dataIndex === 'station_management') {
+        // 检查是否选择了"日期"选项
+        if (Array.isArray(values.station_management) && values.station_management.includes('日期')) {
+          // 创建当前时间戳
+          const currentTimestamp = new Date().toISOString();
+          
+          // 从选项中移除"日期"
+          const optionsWithoutDate = values.station_management.filter(item => item !== '日期');
+          
+          // 将其他选项和时间戳一起保存在station_management字段中
+          // 保存格式：[选项1, 选项2, ..., 时间戳]
+          updateData[dataIndex] = [...optionsWithoutDate, currentTimestamp];
+          
+          console.log('检测到"日期"选项，添加时间戳:', currentTimestamp);
         }
       }
       
@@ -1344,14 +1354,14 @@ const CustomerList = () => {
     const isTimestamp = (val: any) => {
       if (!val) return false;
       
-      // 数组格式：如果是数组且只有一个元素，检查元素是否是时间戳
-      if (Array.isArray(val) && val.length === 1) {
-        return dayjs(val[0]).isValid();
+      // 如果是数组，检查是否有任意元素是时间戳
+      if (Array.isArray(val)) {
+        return val.some(item => typeof item === 'string' && dayjs(item).isValid() && item.includes('T'));
       }
       
-      // 字符串格式：检查是否是时间戳
-      if (typeof val === 'string' && !val.includes(',')) {
-        return dayjs(val).isValid();
+      // 字符串格式：检查是否是时间戳(ISO格式带T的字符串)
+      if (typeof val === 'string') {
+        return dayjs(val).isValid() && val.includes('T');
       }
       
       return false;
@@ -1368,7 +1378,7 @@ const CustomerList = () => {
       >
         <Select
           mode="multiple"
-          placeholder={`请选择${title}，若不选择将显示时间戳`}
+          placeholder="请选择补充资料"
           autoFocus
           allowClear
           style={{ width: '100%' }}
@@ -1395,6 +1405,15 @@ const CustomerList = () => {
           {parsedValue.length > 0 ? (
             // 如果有选择项，显示带颜色的标签
             parsedValue.map((item: string) => {
+              // 检查当前项是否是时间戳
+              if (typeof item === 'string' && dayjs(item).isValid() && item.includes('T')) {
+                return (
+                  <Tag key={item} color="green">
+                    <ClockCircleOutlined /> {dayjs(item).format('YYYY-MM-DD HH:mm')}
+                  </Tag>
+                );
+              }
+              
               const option = options.find(o => o.value === item);
               return (
                 <Tag key={item} color={option?.color || 'default'} style={{ margin: '0 1px 0 0', padding: '0 4px' }}>
@@ -1406,9 +1425,13 @@ const CustomerList = () => {
             // 如果是时间戳（没有选择任何选项），显示时间戳
             <Tag color="green">
               <ClockCircleOutlined /> 
-              {Array.isArray(value) && value.length === 1 
-                ? dayjs(value[0]).format('YYYY-MM-DD HH:mm')
-                : typeof value === 'string' ? dayjs(value).format('YYYY-MM-DD HH:mm') : ''}
+              {Array.isArray(value) 
+                ? value.find((item: any) => typeof item === 'string' && dayjs(item).isValid() && item.includes('T'))
+                  ? dayjs(value.find((item: any) => typeof item === 'string' && dayjs(item).isValid() && item.includes('T'))).format('YYYY-MM-DD HH:mm')
+                  : ''
+                : typeof value === 'string' && value.includes('T')
+                  ? dayjs(value).format('YYYY-MM-DD HH:mm') 
+                  : ''}
             </Tag>
           ) : (
             // 如果没有值，显示未设置
@@ -2710,18 +2733,10 @@ const CustomerList = () => {
       dataIndex: 'company',
       key: 'company',
       render: (value, record) => {
-        // 处理公司名称显示，确保始终显示为中文
-        let displayValue = value;
-        if (value === 'youZhi') {
-          displayValue = '祐之';
-        } else if (value === 'haochen') {
-          displayValue = '昊尘';
-        }
-        
-        // 使用可编辑单元格，公司字段直接使用经过处理的值
+        // 直接使用中文显示公司名称
         return <EditableSelectCell 
-          value={displayValue} 
-          record={{...record, company: displayValue}} 
+          value={value} 
+          record={record} 
           dataIndex="company" 
           title="公司" 
           options={[
@@ -3446,39 +3461,32 @@ const CustomerList = () => {
     const editable = isEditing(record, 'surveyor');
     const [hover, setHover] = useState(false);
     
-    // 将踏勘员数据转换为Select选项格式
+    // 将踏勘员数据转换为AutoComplete选项格式
     const surveyorOptions = surveyors.map(surveyor => ({
       value: surveyor.name,
       label: surveyor.name,
       phone: surveyor.phone || ''
     }));
     
-    // 添加一个清空选项
-    surveyorOptions.unshift({
-      value: '',
-      label: '清空踏勘员',
-      phone: ''
-    });
-    
     return editable ? (
       <Form.Item
         name="surveyor"
         style={{ margin: 0 }}
       >
-        <Select
-          placeholder="请选择踏勘员"
+        <AutoComplete
+          placeholder="请输入或选择踏勘员"
           autoFocus
-          allowClear
-          showSearch
-          optionFilterProp="label"
           options={surveyorOptions}
           onBlur={() => record.id ? saveEditedCell(record.id) : undefined}
-          onChange={(value, option) => {
+          onSelect={(value, option: any) => {
             // 如果选择了踏勘员，自动填充电话
-            if (value && typeof option === 'object' && 'phone' in option) {
+            if (value && option && option.phone) {
               editForm.setFieldsValue({ surveyor_phone: option.phone });
             }
           }}
+          filterOption={(inputValue, option) =>
+            option!.value.toString().toLowerCase().indexOf(inputValue.toLowerCase()) !== -1
+          }
         />
       </Form.Item>
     ) : (

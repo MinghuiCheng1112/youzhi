@@ -106,6 +106,9 @@ const CustomerForm = () => {
           : (values.station_management || null),
       }
       
+      // 不再将公司字段转换为中文，保持原始值
+      console.log('公司字段值:', formattedValues.company);
+      
       // 如果是踏勘员创建客户，获取踏勘员信息并关联
       if (!isEdit && userRole === 'surveyor' && user?.email) {
         try {
@@ -909,8 +912,8 @@ const CustomerForm = () => {
               label="公司"
             >
               <Select disabled={!canEdit()}>
-                <Option value="haoChen">昊尘</Option>
-                <Option value="youZhi">祐之</Option>
+                <Option value="昊尘">昊尘</Option>
+                <Option value="祐之">祐之</Option>
               </Select>
             </Form.Item>
           </Col>

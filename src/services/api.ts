@@ -1141,6 +1141,22 @@ export const deletedRecordsApi = {
     }
   },
   
+  async getRestoredRecords() {
+    try {
+      const { data, error } = await supabase.rpc('get_restored_records');
+      
+      if (error) {
+        console.error('获取已恢复记录失败:', error);
+        return { data: null, error };
+      }
+      
+      return { data, error: null };
+    } catch (error) {
+      console.error('获取已恢复记录出现异常:', error);
+      return { data: null, error };
+    }
+  },
+  
   async restoreDeletedRecord(recordId: string) {
     try {
       const { data, error } = await supabase.rpc('restore_deleted_record', {

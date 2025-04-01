@@ -53,13 +53,14 @@ export interface Customer {
   power_purchase_contract: string | null // 购售电合同
   status: string | null // 状态
   price: number | null // 价格
-  company: 'haoChen' | 'youZhi' | null // 公司
+  company: string | null // 公司
   remarks: string | null // 备注
   first_contact: string | null // 首次联系日期
   renewal_status: string | null // 续约状态
   created_at: string
   updated_at: string
   deleted_at: string | null
+  timestamp?: string // 时间戳字段，用于补充资料中的日期选项
 }
 
 // 修改记录类型定义
