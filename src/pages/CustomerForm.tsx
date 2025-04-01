@@ -643,7 +643,7 @@ const CustomerForm = () => {
             <Form.Item
               name="module_count"
               label="组件数量"
-              rules={[{ required: true, message: '请输入组件数量' }]}
+              rules={[{ required: false, message: '请输入组件数量' }]}
             >
               <InputNumber
                 style={{ width: '100%' }}

@@ -2710,10 +2710,18 @@ const CustomerList = () => {
       dataIndex: 'company',
       key: 'company',
       render: (value, record) => {
-        // 使用可编辑单元格，公司字段直接使用数据库中的值（昊尘或祐之）
+        // 处理公司名称显示，确保始终显示为中文
+        let displayValue = value;
+        if (value === 'youZhi') {
+          displayValue = '祐之';
+        } else if (value === 'haochen') {
+          displayValue = '昊尘';
+        }
+        
+        // 使用可编辑单元格，公司字段直接使用经过处理的值
         return <EditableSelectCell 
-          value={value} 
-          record={record} 
+          value={displayValue} 
+          record={{...record, company: displayValue}} 
           dataIndex="company" 
           title="公司" 
           options={[
