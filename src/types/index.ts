@@ -1,6 +1,12 @@
 // 更新出库状态类型定义
 export type OutboundStatus = 'none' | 'outbound' | 'inbound' | 'returned';
 
+// 技术审核状态类型定义
+export type TechnicalReviewStatus = 'pending' | 'approved' | 'rejected';
+
+// 建设验收状态类型定义
+export type ConstructionAcceptanceStatus = 'pending' | 'waiting' | 'completed';
+
 // 客户信息类型定义
 export interface Customer {
   id: string
@@ -42,13 +48,15 @@ export interface Customer {
   construction_status: string | null // 施工状态
   main_line: string | null // 大线
   large_cable: string | null // 大线
-  technical_review: string | null // 技术审核
+  technical_review_status: TechnicalReviewStatus | null // 技术审核状态
   technical_review_date: string | null // 技术审核日期
   technical_review_notes: string | null // 技术审核备注
   upload_to_grid: string | null // 上传国网
-  construction_acceptance: string | null // 建设验收
+  construction_acceptance_status: ConstructionAcceptanceStatus | null // 建设验收状态
   construction_acceptance_date: string | null // 建设验收日期
   construction_acceptance_notes: string | null // 建设验收备注
+  construction_acceptance_waiting_days: number | null // 建设验收等待天数
+  construction_acceptance_waiting_start: string | null // 建设验收等待开始时间
   meter_installation_date: string | null // 挂表日期
   power_purchase_contract: string | null // 购售电合同
   status: string | null // 状态

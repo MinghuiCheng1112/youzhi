@@ -48,7 +48,7 @@ const CustomerForm = () => {
           const formattedData = {
             ...data,
             register_date: data.register_date ? dayjs(data.register_date) : null,
-            filing_date: data.filing_date ? dayjs(data.filing_date) : null,
+            filing_date: data.filing_date || null, // 直接使用原始值，不再转换为dayjs对象
             // 将字符串转换为数组（如果是字符串）
             station_management: typeof data.station_management === 'string' 
               ? data.station_management.split(',') 
@@ -99,7 +99,7 @@ const CustomerForm = () => {
       const formattedValues = {
         ...values,
         register_date: values.register_date ? values.register_date.format() : null,
-        filing_date: values.filing_date ? values.filing_date.format() : null,
+        filing_date: values.filing_date || null, // 直接使用输入值，不再尝试格式化
         // 处理补充资料字段 - 修复数组格式
         station_management: Array.isArray(values.station_management) 
           ? (values.station_management.length > 0 ? `{${values.station_management.join(',')}}` : null)
@@ -319,9 +319,12 @@ const CustomerForm = () => {
 
   // 技术审核按钮操作
   const handleTechnicalReview = () => {
-    const currentValue = form.getFieldValue('technical_review')
-    const newValue = currentValue ? null : new Date().toISOString()
-    form.setFieldsValue({ technical_review: newValue })
+    const currentValue = form.getFieldValue('technical_review_status')
+    const newValue = currentValue === 'approved' ? 'pending' : 'approved'
+    form.setFieldsValue({ 
+      technical_review_status: newValue,
+      technical_review_date: newValue === 'approved' ? new Date().toISOString() : null 
+    })
   }
 
   // 上传国网按钮操作
@@ -333,9 +336,12 @@ const CustomerForm = () => {
 
   // 建设验收按钮操作
   const handleConstructionAcceptance = () => {
-    const currentValue = form.getFieldValue('construction_acceptance')
-    const newValue = currentValue ? null : new Date().toISOString()
-    form.setFieldsValue({ construction_acceptance: newValue })
+    const currentValue = form.getFieldValue('construction_acceptance_status')
+    const newValue = currentValue === 'completed' ? 'pending' : 'completed'
+    form.setFieldsValue({ 
+      construction_acceptance_status: newValue,
+      construction_acceptance_date: newValue === 'completed' ? new Date().toISOString() : null
+    })
   }
 
   // 挂表日期按钮操作
@@ -588,7 +594,7 @@ const CustomerForm = () => {
               name="filing_date"
               label="备案日期"
             >
-              <DatePicker style={{ width: '100%' }} disabled={!canEdit()} />
+              <Input placeholder="可输入日期或其他说明文字" disabled={!canEdit()} />
             </Form.Item>
           </Col>
           
@@ -817,11 +823,11 @@ const CustomerForm = () => {
           
           <Col xs={24} sm={12} md={8}>
             <Form.Item
-              name="technical_review"
+              name="technical_review_status"
               label="技术审核"
             >
               <div>
-                {renderButtonOrTimestamp('technical_review', '驳回', handleTechnicalReview)}
+                {renderButtonOrTimestamp('technical_review_status', '驳回', handleTechnicalReview)}
               </div>
             </Form.Item>
           </Col>
@@ -839,11 +845,11 @@ const CustomerForm = () => {
           
           <Col xs={24} sm={12} md={8}>
             <Form.Item
-              name="construction_acceptance"
+              name="construction_acceptance_status"
               label="建设验收"
             >
               <div>
-                {renderButtonOrTimestamp('construction_acceptance', '未到', handleConstructionAcceptance)}
+                {renderButtonOrTimestamp('construction_acceptance_status', '未到', handleConstructionAcceptance)}
               </div>
             </Form.Item>
           </Col>

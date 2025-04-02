@@ -410,7 +410,7 @@ const ImportCustomers = () => {
           customerData.register_date = new Date(customerData.register_date).toISOString();
         }
         
-        // 备案日期可以是日期或文字
+        // 备案日期可以是日期或文字，保持原始格式
         if (customerData.filing_date) {
           // 尝试转换为日期
           const filingDate = new Date(customerData.filing_date);
@@ -419,6 +419,11 @@ const ImportCustomers = () => {
             customerData.filing_date = filingDate.toISOString();
           }
           // 如果不是有效日期，保持原文字格式
+        }
+        
+        // 电话号码可以为空
+        if (!customerData.phone) {
+          customerData.phone = '';
         }
         
         // 转换数字字段

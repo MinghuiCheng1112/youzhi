@@ -23,7 +23,7 @@ export function updateWithCacheFixed(id: string, updates: any): any {
   });
   
   // 处理布尔字段，确保正确转换
-  const boolFields = ['drawing_change', 'construction_status', 'construction_acceptance', 'technical_review'];
+  const boolFields = ['drawing_change', 'construction_status', 'technical_review'];
   boolFields.forEach(field => {
     if (field in processedUpdates) {
       const boolValue = processedUpdates[field];

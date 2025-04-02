@@ -326,6 +326,7 @@ export const customerApi = {
     const { data, error } = await supabase
       .from('customers')
       .select('*')
+      .is('deleted_at', null)  // 只获取未删除的客户
       .order('created_at', { ascending: false })
 
     if (error) throw error
@@ -387,6 +388,60 @@ export const customerApi = {
     }
     
     return data
+  },
+
+  /**
+   * 创建新客户(异步模式)
+   * 前端立即返回一个临时ID的客户对象，后台静默处理实际创建
+   * @param {CreateCustomerInput} customer - 客户信息对象
+   * @returns {Promise<string>} 生成的临时客户ID
+   */
+  createWithCache: async (customer: CreateCustomerInput): Promise<string> => {
+    // 生成一个临时ID
+    const tempId = `temp_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    
+    // 处理数据，确保格式正确
+    const processedCustomer = { ...customer };
+    
+    // 处理数字字段
+    const numberFields = ['module_count', 'capacity', 'investment_amount', 'land_area', 'price'];
+    numberFields.forEach(field => {
+      if (field in processedCustomer) {
+        const value = (processedCustomer as any)[field];
+        
+        // 详细记录字段处理
+        console.log(`createWithCache处理${field}字段，原始值:`, value, `类型:`, typeof value);
+        
+        // 严格处理各种空值情况
+        if (value === '' || value === undefined || value === null || 
+            (typeof value === 'string' && value.trim() === '') || 
+            (typeof value === 'number' && isNaN(value))) {
+          (processedCustomer as any)[field] = null;
+        } 
+        // 处理可能是数字的字符串
+        else if (typeof value === 'string' && value.trim() !== '') {
+          // 尝试将非空字符串转换为数字
+          const numValue = Number(value);
+          if (!isNaN(numValue)) {
+            (processedCustomer as any)[field] = numValue;
+          } else {
+            // 如果转换失败，设置为null
+            (processedCustomer as any)[field] = null;
+          }
+        }
+      }
+    });
+    
+    // 后台静默创建客户
+    customerApi.create(processedCustomer)
+      .then(newCustomer => {
+        console.log('客户创建成功:', newCustomer);
+      })
+      .catch(error => {
+        console.error('后台创建客户失败:', error);
+      });
+    
+    return tempId;
   },
 
   /**
@@ -566,7 +621,7 @@ export const customerApi = {
     });
     
     // 处理日期字段
-    const dateFields = ['register_date', 'filing_date', 'dispatch_date', 'meter_installation_date'];
+    const dateFields = ['register_date', 'dispatch_date', 'meter_installation_date'];
     dateFields.forEach(field => {
       if (field in processedUpdates && processedUpdates[field as keyof UpdateCustomerInput]) {
         const dateValue = processedUpdates[field as keyof UpdateCustomerInput];
@@ -579,7 +634,7 @@ export const customerApi = {
     
     // 处理布尔字段，确保正确转换
     // construction_status字段特殊处理，它实际上是一个日期字符串或null，而不是布尔值
-    const boolFields = ['construction_acceptance', 'technical_review'];
+    const boolFields: string[] = [];
     boolFields.forEach(field => {
       if (field in processedUpdates) {
         const boolValue = processedUpdates[field as keyof UpdateCustomerInput];
@@ -621,7 +676,7 @@ export const customerApi = {
   delete: async (id: string): Promise<void> => {
     const { error } = await supabase
       .from('customers')
-      .delete()
+      .update({ deleted_at: new Date().toISOString() })
       .eq('id', id)
 
     if (error) throw error
@@ -682,17 +737,17 @@ export const customerApi = {
     for (let i = 0; i < customers.length; i++) {
       const customer = customers[i]
       try {
-        // 检查必要字段
-        if (!customer.customer_name || !customer.phone) {
+        // 检查必要字段，只检查客户姓名
+        if (!customer.customer_name) {
           result.failed++
           result.failedItems?.push({
             row: i + 1,
-            reason: '缺少必要字段：客户姓名或电话号码'
+            reason: '缺少必要字段：客户姓名'
           })
           continue
         }
 
-        // 检查是否重复
+        // 检查是否重复，只根据姓名检查，电话可以为空
         const isDuplicate = await customerApi.checkDuplicate(
           customer.customer_name || '',
           customer.phone || ''

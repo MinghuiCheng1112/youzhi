@@ -19,6 +19,7 @@ import DeletedRecords from './pages/DeletedRecords'
 import DrawSystem from './pages/DrawSystem'
 import NotFound from './pages/NotFound'
 import { VerifyEmail } from './pages/VerifyEmail'
+import NewCustomerForm from './pages/NewCustomerForm'
 
 // 角色特定页面
 import RoleDashboard from './pages/roles/RoleDashboard'
@@ -189,7 +190,7 @@ function App() {
                 } />
                 <Route path="customers/new" element={
                   <RoleRoute allowedRoles={['admin']}>
-                    <CustomerForm />
+                    <NewCustomerForm />
                   </RoleRoute>
                 } />
                 <Route path="customers/import" element={
