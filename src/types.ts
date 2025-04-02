@@ -45,11 +45,17 @@ export interface Customer {
   main_line?: string;
   large_cable?: string;
   technical_review?: string | null;
+  technical_review_status?: 'pending' | 'approved' | 'rejected';
+  technical_review_date?: string | null;
+  technical_review_notes?: string | null;
   technical_review_rejected?: string | null;
   upload_to_grid?: string | null;
   construction_acceptance?: string | null;
+  construction_acceptance_status?: 'pending' | 'waiting' | 'completed';
   construction_acceptance_date?: string | null;
   construction_acceptance_notes?: string | null;
+  construction_acceptance_waiting_days?: number | null;
+  construction_acceptance_waiting_start?: string | null;
   meter_installation_date?: string | null;
   power_purchase_contract?: string | null;
   status?: string;
