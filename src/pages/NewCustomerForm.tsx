@@ -191,7 +191,7 @@ const NewCustomerForm = () => {
         onFinish={onFinish}
         initialValues={{
           register_date: dayjs(),
-          drawing_change: '无变更',
+          drawing_change: '未出图',
           company: '祐之', // 默认选择祐之
           status: '待处理',    // 默认状态
           technical_review_status: 'pending',
