@@ -358,9 +358,9 @@ const NewCustomerForm = () => {
             <Form.Item 
               name="drawing_change" 
               label="图纸变更"
-              initialValue="无变更"
+              initialValue="未出图"
             >
-              <Input placeholder="无变更" />
+              <Input placeholder="未出图" />
             </Form.Item>
           </Col>
         </Row>
