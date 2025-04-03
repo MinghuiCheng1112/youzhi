@@ -144,7 +144,7 @@ const NewCustomerForm = () => {
       
       // 设置图纸变更默认值
       if (!formattedValues.drawing_change) {
-        formattedValues.drawing_change = '无变更';
+        formattedValues.drawing_change = '未出图';
       }
       
       console.log('提交的客户数据:', formattedValues);
