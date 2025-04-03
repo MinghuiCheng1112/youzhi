@@ -30,20 +30,20 @@ ALTER TABLE public.customers
   ALTER COLUMN drawing_change TYPE TEXT USING 
     CASE 
       WHEN drawing_change = true THEN '变更一' 
-      ELSE '无变更' 
+      ELSE '未出图' 
     END;
 
 -- 设置默认值
 ALTER TABLE public.customers 
-  ALTER COLUMN drawing_change SET DEFAULT '无变更';
+  ALTER COLUMN drawing_change SET DEFAULT '未出图';
 
 -- 更新现有记录
 UPDATE public.customers 
-SET drawing_change = '无变更' 
+SET drawing_change = '未出图' 
 WHERE drawing_change IS NULL;
 
 -- 添加列注释
-COMMENT ON COLUMN public.customers.drawing_change IS '图纸变更状态，值为：无变更、变更一、变更二、变更三等';
+COMMENT ON COLUMN public.customers.drawing_change IS '图纸变更状态，值为：未出图、变更一、变更二、变更三等';
 
 COMMIT;
 

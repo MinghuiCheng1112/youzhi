@@ -144,7 +144,7 @@ const NewCustomerForm = () => {
       
       // 设置图纸变更默认值
       if (!formattedValues.drawing_change) {
-        formattedValues.drawing_change = '无变更';
+        formattedValues.drawing_change = '未出图';
       }
       
       console.log('提交的客户数据:', formattedValues);
@@ -191,8 +191,8 @@ const NewCustomerForm = () => {
         onFinish={onFinish}
         initialValues={{
           register_date: dayjs(),
-          drawing_change: '无变更',
-          company: '祐之', // 默认选择祐之
+          drawing_change: '未出图',
+          company: '昊尘', // 默认选择昊尘
           status: '待处理',    // 默认状态
           technical_review_status: 'pending',
           construction_acceptance_status: 'pending'
@@ -358,9 +358,9 @@ const NewCustomerForm = () => {
             <Form.Item 
               name="drawing_change" 
               label="图纸变更"
-              initialValue="无变更"
+              initialValue="未出图"
             >
-              <Input placeholder="无变更" />
+              <Input placeholder="未出图" />
             </Form.Item>
           </Col>
         </Row>

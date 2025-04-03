@@ -48,20 +48,22 @@ async function fixDrawingChange() {
     for (const customer of customers) {
       try {
         // 确定正确的drawing_change值
-        let correctValue = '无变更';
+        let correctValue = '未出图';
         
         if (customer.drawing_change !== null) {
           if (customer.drawing_change === true) {
             correctValue = '变更一';
           } else if (customer.drawing_change === false) {
-            correctValue = '无变更';
+            correctValue = '未出图';
           } else if (typeof customer.drawing_change === 'string') {
             if (customer.drawing_change.trim() === '') {
-              correctValue = '无变更';
+              correctValue = '未出图';
             } else if (customer.drawing_change === 'true') {
               correctValue = '变更一';
             } else if (customer.drawing_change === 'false') {
-              correctValue = '无变更';
+              correctValue = '未出图';
+            } else if (customer.drawing_change === '无变更') {
+              correctValue = '未出图';
             } else {
               correctValue = customer.drawing_change;
             }

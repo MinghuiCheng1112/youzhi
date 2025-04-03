@@ -17,6 +17,7 @@ export interface Customer {
   id_card: string // 身份证号
   salesman: string // 业务员
   salesman_phone: string | null // 业务员电话
+  salesman_email?: string | null // 业务员邮箱(隐藏字段，用于关联)
   surveyor: string | null // 踏勘员
   surveyor_phone: string | null // 踏勘员电话
   surveyor_email: string | null // 踏勘员邮箱(隐藏字段，用于关联)
@@ -32,9 +33,13 @@ export interface Customer {
   land_area: number // 用地面积
   module_count: number | null // 组件数量
   inverter: string // 逆变器
+  inverter_outbound_date?: string | null // 逆变器出库日期
   copper_wire: string // 铜线
+  copper_wire_outbound_date?: string | null // 铜线出库日期
   aluminum_wire: string // 铝线
+  aluminum_wire_outbound_date?: string | null // 铝线出库日期
   distribution_box: string // 配电箱
+  distribution_box_outbound_date?: string | null // 配电箱出库日期
   square_steel_outbound_date: string | null // 方钢出库日期
   component_outbound_date: string | null // 组件出库日期
   square_steel_inbound_date: string | null // 方钢回库日期
@@ -48,10 +53,12 @@ export interface Customer {
   construction_status: string | null // 施工状态
   main_line: string | null // 大线
   large_cable: string | null // 大线
+  technical_review: string | null // 技术审核
   technical_review_status: TechnicalReviewStatus | null // 技术审核状态
   technical_review_date: string | null // 技术审核日期
   technical_review_notes: string | null // 技术审核备注
   upload_to_grid: string | null // 上传国网
+  construction_acceptance: string | null // 建设验收
   construction_acceptance_status: ConstructionAcceptanceStatus | null // 建设验收状态
   construction_acceptance_date: string | null // 建设验收日期
   construction_acceptance_notes: string | null // 建设验收备注

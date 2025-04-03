@@ -15,13 +15,13 @@ BEGIN
   RAISE NOTICE '图纸变更字段当前默认值: %', current_default;
 END $$;
 
--- 修改字段默认值为'无变更'
+-- 修改字段默认值为'未出图'
 ALTER TABLE customers
-ALTER COLUMN drawing_change SET DEFAULT '无变更';
+ALTER COLUMN drawing_change SET DEFAULT '未出图';
 
--- 将当前所有为false或null的值更新为'无变更'
+-- 将当前所有为false或null的值更新为'未出图'
 UPDATE customers
-SET drawing_change = '无变更'
+SET drawing_change = '未出图'
 WHERE drawing_change IS NULL OR drawing_change = 'false' OR drawing_change = 'f' OR drawing_change = 'NULL' OR drawing_change = '';
 
 -- 验证修改结果

@@ -319,7 +319,8 @@ export const EditableMultipleSelectCell = ({ value, record, dataIndex, title, op
 
 // 添加图纸变更选项
 const DRAWING_CHANGE_OPTIONS = [
-  { value: '无变更', label: '无变更', color: 'default' },
+  { value: '未出图', label: '未出图', color: 'default' },
+  { value: '已出图', label: '已出图', color: 'green' },
   { value: '变更1', label: '变更1', color: 'blue' },
   { value: '变更2', label: '变更2', color: 'purple' },
   { value: '变更3', label: '变更3', color: 'orange' },
@@ -348,7 +349,7 @@ export const EditableSelectCell = ({ value, record, dataIndex, title, options, o
   const handleSave = () => {
     // 针对图纸变更字段，确保始终是字符串
     if (dataIndex === 'drawing_change' && (selectValue === null || selectValue === undefined || selectValue === '')) {
-      onSave(record, dataIndex, '无变更');
+      onSave(record, dataIndex, '未出图');
     } else {
       onSave(record, dataIndex, selectValue);
     }
@@ -359,7 +360,7 @@ export const EditableSelectCell = ({ value, record, dataIndex, title, options, o
     <div style={{ width: '100%' }}>
       <Select
         placeholder={`请选择${title}`}
-        defaultValue={value || (dataIndex === 'drawing_change' ? '无变更' : undefined)}
+        defaultValue={value || (dataIndex === 'drawing_change' ? '未出图' : undefined)}
         style={{ width: '100%' }}
         options={options}
         onChange={(newValue) => setSelectValue(newValue)}
@@ -387,7 +388,7 @@ export const EditableSelectCell = ({ value, record, dataIndex, title, options, o
           // 图纸变更特殊显示
           <div style={{ display: 'flex', justifyContent: 'center' }}>
             {(() => {
-              // 获取当前选项，默认为"无变更"
+              // 获取当前选项，默认为"未出图"
               const option = options.find(o => o.value === value) || options[0];
               
               // 定义按钮颜色映射
@@ -500,7 +501,7 @@ const SalesmanDashboard = () => {
       const pendingCount = customers.filter(c => !c.construction_status).length
       const changedDrawingCount = customers.filter(c => 
         typeof c.drawing_change === 'string' && 
-        c.drawing_change !== '无变更'
+        c.drawing_change !== '未出图'
       ).length
       const urgeOrderCount = customers.filter(c => c.urge_order).length
       const totalModules = customers.reduce((sum, c) => sum + (c.module_count || 0), 0)
@@ -1429,7 +1430,7 @@ const SalesmanDashboard = () => {
       width: 120,
       align: 'center' as const,
       render: (value: string) => {
-        // 获取当前选项，默认为"无变更"
+        // 获取当前选项，默认为"未出图"
         const option = DRAWING_CHANGE_OPTIONS.find(o => o.value === value) || DRAWING_CHANGE_OPTIONS[0];
         
         // 定义按钮颜色映射
@@ -1466,8 +1467,8 @@ const SalesmanDashboard = () => {
         );
       },
       sorter: (a: Customer, b: Customer) => {
-        const valA = typeof a.drawing_change === 'string' ? a.drawing_change : '无变更';
-        const valB = typeof b.drawing_change === 'string' ? b.drawing_change : '无变更';
+        const valA = typeof a.drawing_change === 'string' ? a.drawing_change : '未出图';
+        const valB = typeof b.drawing_change === 'string' ? b.drawing_change : '未出图';
         return valA.localeCompare(valB);
       },
     },

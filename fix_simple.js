@@ -28,14 +28,14 @@ async function fixDrawingChange() {
       UPDATE customers 
       SET drawing_change = CASE 
           WHEN drawing_change::text = 'true' THEN '变更一' 
-          WHEN drawing_change::text = 'false' THEN '无变更'
-          WHEN drawing_change IS NULL THEN '无变更'
+          WHEN drawing_change::text = 'false' THEN '未出图'
+          WHEN drawing_change IS NULL THEN '未出图'
           ELSE drawing_change  
         END;
         
       -- 确保所有空值都设为默认值
       UPDATE customers
-      SET drawing_change = '无变更'
+      SET drawing_change = '未出图'
       WHERE drawing_change IS NULL OR drawing_change = '';
     `;
     

@@ -78,11 +78,11 @@ async function fixSupabaseSchema() {
     const alterColumnSQL = `
       ALTER TABLE customers
       ALTER COLUMN drawing_change TYPE TEXT
-      USING CASE WHEN drawing_change THEN '变更一' ELSE '无变更' END;
+      USING CASE WHEN drawing_change THEN '变更一' ELSE '未出图' END;
       
       -- 设置默认值
       ALTER TABLE customers
-      ALTER COLUMN drawing_change SET DEFAULT '无变更';
+      ALTER COLUMN drawing_change SET DEFAULT '未出图';
     `;
     
     const { data: alterResult, error: alterError } = await supabase.rpc('exec_sql', { sql_query: alterColumnSQL });
@@ -128,8 +128,8 @@ async function fixSupabaseSchema() {
     const updateRecordsSQL = `
       UPDATE customers
       SET drawing_change = CASE 
-          WHEN drawing_change IS NULL THEN '无变更'
-          WHEN drawing_change = '' THEN '无变更'
+          WHEN drawing_change IS NULL THEN '未出图'
+          WHEN drawing_change = '' THEN '未出图'
           ELSE drawing_change
         END;
     `;

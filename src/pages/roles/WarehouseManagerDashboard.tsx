@@ -217,7 +217,13 @@ const WarehouseManagerDashboard = () => {
     const outboundCustomers = data.filter(c => c.component_outbound_date || c.square_steel_outbound_date).length;
     const pendingOutbound = data.filter(c => !c.component_outbound_date && !c.square_steel_outbound_date).length;
     const urgeOrderCount = data.filter(c => c.urge_order).length;
-    const drawingChangeCount = data.filter(c => c.drawing_change).length;
+    const drawingChangeCount = data.filter(c => {
+      // 只有当值为"变更1"至"变更5"才计数
+      if (typeof c.drawing_change === 'string') {
+        return ['变更1', '变更2', '变更3', '变更4', '变更5'].includes(c.drawing_change);
+      }
+      return false;
+    }).length;
     
     setStats({
       totalCustomers,
@@ -550,16 +556,34 @@ const WarehouseManagerDashboard = () => {
       render: (value: any) => {
         // 兼容布尔值和字符串
         if (typeof value === 'boolean') {
-          return value ? <Tag color="red">变更</Tag> : "无变更";
+          return value ? <Tag color="red">变更</Tag> : "未出图";
         }
         
-        if (!value || value === '无变更') {
-          return "无变更";
+        if (!value || value === '未出图') {
+          return "未出图";
         }
         
-        return <Tag color="red">{value}</Tag>;
+        // 对"变更1"至"变更5"的值使用红色标签
+        if (typeof value === 'string' && ['变更1', '变更2', '变更3', '变更4', '变更5'].includes(value)) {
+          return <Tag color="red">{value}</Tag>;
+        }
+        
+        // 其他值用普通文本显示
+        return value;
       },
-      sorter: (a: Customer, b: Customer) => Number(!!a.drawing_change) - Number(!!b.drawing_change),
+      sorter: (a: Customer, b: Customer) => {
+        // 自定义排序: 变更1-5 > 其他变更值 > 未出图
+        const valA = typeof a.drawing_change === 'string' ? a.drawing_change : '';
+        const valB = typeof b.drawing_change === 'string' ? b.drawing_change : '';
+        
+        // 检查是否为变更1-5
+        const isSpecialChangeA = ['变更1', '变更2', '变更3', '变更4', '变更5'].includes(valA);
+        const isSpecialChangeB = ['变更1', '变更2', '变更3', '变更4', '变更5'].includes(valB);
+        
+        if (isSpecialChangeA && !isSpecialChangeB) return -1;
+        if (!isSpecialChangeA && isSpecialChangeB) return 1;
+        return valA.localeCompare(valB);
+      },
     },
     {
       title: '催单',
@@ -1114,7 +1138,11 @@ const WarehouseManagerDashboard = () => {
         <Col span={6}>
           <Card hoverable style={CARD_STYLE}>
             <Statistic 
-              title="图纸变更" 
+              title={
+                <Tooltip title="仅统计图纸变更1-5的记录">
+                  <span>图纸变更户数</span>
+                </Tooltip>
+              }
               value={stats.drawingChangeCount} 
               suffix="户" 
               valueStyle={{ color: '#9254de' }}

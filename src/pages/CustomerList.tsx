@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
-import { Table, Button, Input, Space, message, Modal, Tag, Tooltip, Typography, Upload, Drawer, Divider, Select, DatePicker, Form, Radio, InputNumber, Dropdown, Menu, AutoComplete } from 'antd'
+import { Table, Button, Input, Space, message, Modal, Tag, Tooltip, Typography, Upload, Drawer, Divider, Select, DatePicker, Form, Radio, InputNumber, Dropdown, Menu, AutoComplete, Checkbox, Row, Col } from 'antd'
 import { 
   PlusOutlined, 
   SearchOutlined, 
@@ -66,7 +66,7 @@ const CustomerList = () => {
 
   // 定义图纸变更选项
   const DRAWING_CHANGE_OPTIONS = [
-    { value: '无变更', label: '无变更', color: 'default' },
+    { value: '未出图', label: '未出图', color: 'default' },
     { value: '已出图', label: '已出图', color: 'green' },
     { value: '变更1', label: '变更1', color: 'blue' },
     { value: '变更2', label: '变更2', color: 'purple' },
@@ -80,6 +80,56 @@ const CustomerList = () => {
 
   // 设计师选项
   const [designers, setDesigners] = useState<{name: string, phone: string}[]>([]);
+
+  // 在组件开始处添加状态
+  const [exportModalVisible, setExportModalVisible] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportFields, setExportFields] = useState<{[key: string]: boolean}>({
+    '登记日期': true,
+    '客户姓名': true,
+    '客户电话': true,
+    '地址': true,
+    '身份证号': true,
+    '业务员': true,
+    '业务员电话': true,
+    '业务员邮箱': false,
+    '踏勘员': true,
+    '踏勘员电话': true,
+    '踏勘员邮箱': false,
+    '补充资料': true,
+    '备案日期': true,
+    '电表号码': true,
+    '设计师': true,
+    '设计师电话': true,
+    '图纸变更': true,
+    '催单': true,
+    '容量(KW)': true,
+    '投资金额': true,
+    '用地面积(m²)': true,
+    '组件数量': true,
+    '逆变器': true,
+    '铜线': true,
+    '铝线': true,
+    '配电箱': true,
+    '方钢出库日期': true,
+    '组件出库日期': true,
+    '派工日期': true,
+    '施工队': true,
+    '施工队电话': true,
+    '施工状态': true,
+    '大线': true,
+    '技术审核': true,
+    '上传国网': true,
+    '建设验收': true,
+    '挂表日期': true,
+    '购售电合同': true,
+    '状态': true,
+    '价格': true,
+    '公司': true,
+    '备注': true,
+    '创建时间': false,
+    '最后更新': false,
+  });
 
   useEffect(() => {
     fetchCustomers()
@@ -456,14 +506,14 @@ const CustomerList = () => {
     }
     
     // 设置当前编辑字段的值到表单
-    editForm.setFieldsValue({
+        editForm.setFieldsValue({
       [dataIndex]: record[dataIndex as keyof Customer]
     });
     
     // 针对特定字段的处理
     if (dataIndex === 'salesman') {
       // 同时设置业务员电话
-      editForm.setFieldsValue({
+        editForm.setFieldsValue({
         salesman_phone: record.salesman_phone
       });
     }
@@ -630,7 +680,7 @@ const CustomerList = () => {
       // 特殊处理图纸变更字段
       if (dataIndex === 'drawing_change') {
         if (values.drawing_change === undefined || values.drawing_change === '') {
-          updateData.drawing_change = '无变更';
+          updateData.drawing_change = '未出图';
         }
       }
       
@@ -948,66 +998,300 @@ const CustomerList = () => {
     });
   };
 
-  // 导出客户数据
-  const handleExport = () => {
+  // 处理导出模态框
+  const showExportModal = () => {
+    setExportModalVisible(true);
+  };
+  
+  // 处理导出选项变更
+  const handleExportFieldChange = (fieldName: string, checked: boolean) => {
+    setExportFields(prev => ({
+      ...prev,
+      [fieldName]: checked
+    }));
+  };
+  
+  // 全选所有导出字段
+  const selectAllExportFields = () => {
+    const allFields = { ...exportFields };
+    Object.keys(allFields).forEach(field => {
+      allFields[field] = true;
+    });
+    setExportFields(allFields);
+  };
+  
+  // 取消全选导出字段
+  const deselectAllExportFields = () => {
+    const allFields = { ...exportFields };
+    Object.keys(allFields).forEach(field => {
+      allFields[field] = false;
+    });
+    // 至少保留客户姓名字段
+    allFields['客户姓名'] = true;
+    setExportFields(allFields);
+  };
+  
+  // 带选择字段的导出客户数据
+  const handleExportWithFields = () => {
+    setExportLoading(true);
     try {
+      // 防止大数据量导出时阻塞UI
+      setTimeout(() => {
+        try {
+          // 获取用户选择的字段
+          const selectedFields = Object.keys(exportFields).filter(field => exportFields[field]);
+          
       // 准备要导出的数据
-      const exportData = filteredCustomers.map(customer => ({
-        '登记日期': customer.register_date ? dayjs(customer.register_date).format('YYYY-MM-DD') : '',
-        '客户姓名': customer.customer_name,
-        '客户电话': customer.phone,
-        '地址': customer.address,
-        '身份证号': customer.id_card,
-        '业务员': customer.salesman,
-        '业务员电话': customer.salesman_phone,
-        '补充资料': typeof customer.station_management === 'string' ? customer.station_management : '',
-        '备案日期': customer.filing_date ? dayjs(customer.filing_date).format('YYYY-MM-DD') : '',
-        '电表号码': customer.meter_number,
-        '设计师': customer.designer,
-        '图纸变更': customer.drawing_change || '无变更',
-        '催单': customer.urge_order ? dayjs(customer.urge_order).format('YYYY-MM-DD HH:mm') : '',
-        '容量(KW)': customer.capacity,
-        '投资金额': customer.investment_amount,
-        '用地面积(m²)': customer.land_area,
-        '组件数量': customer.module_count,
-        '逆变器': customer.inverter,
-        '铜线': customer.copper_wire,
-        '铝线': customer.aluminum_wire,
-        '配电箱': customer.distribution_box,
-        '方钢出库日期': customer.square_steel_outbound_date ? 
-          (customer.square_steel_outbound_date === 'RETURNED' ? '退单' : dayjs(customer.square_steel_outbound_date).format('YYYY-MM-DD')) : '',
-        '组件出库日期': customer.component_outbound_date ? 
-          (customer.component_outbound_date === 'RETURNED' ? '退单' : dayjs(customer.component_outbound_date).format('YYYY-MM-DD')) : '',
-        '派工日期': customer.dispatch_date ? dayjs(customer.dispatch_date).format('YYYY-MM-DD') : '',
-        '施工队': customer.construction_team,
-        '施工状态': customer.construction_status ? dayjs(customer.construction_status).format('YYYY-MM-DD') : '',
-        '大线': customer.main_line,
-        '技术审核': customer.technical_review ? dayjs(customer.technical_review).format('YYYY-MM-DD HH:mm') : '',
-        '上传国网': customer.upload_to_grid ? dayjs(customer.upload_to_grid).format('YYYY-MM-DD HH:mm') : '',
-        '建设验收': customer.construction_acceptance ? dayjs(customer.construction_acceptance).format('YYYY-MM-DD HH:mm') : '',
-        '挂表日期': customer.meter_installation_date ? dayjs(customer.meter_installation_date).format('YYYY-MM-DD HH:mm') : '',
-        '购售电合同': customer.power_purchase_contract ? dayjs(customer.power_purchase_contract).format('YYYY-MM-DD HH:mm') : '',
-        '状态': customer.status,
-        '价格': customer.price,
-        '公司': customer.company,
-        '备注': customer.remarks
-      }))
+          const exportData = filteredCustomers.map(customer => {
+            const row: {[key: string]: any} = {};
+            
+            // 只添加用户选择的字段
+            if (exportFields['登记日期']) 
+              row['登记日期'] = customer.register_date && dayjs(customer.register_date).isValid() 
+                ? dayjs(customer.register_date).format('YYYY-MM-DD') 
+                : '';
+            if (exportFields['客户姓名'])
+              row['客户姓名'] = customer.customer_name || '';
+            if (exportFields['客户电话'])
+              row['客户电话'] = customer.phone || '';
+            if (exportFields['地址'])
+              row['地址'] = customer.address || '';
+            if (exportFields['身份证号'])
+              row['身份证号'] = customer.id_card || '';
+            if (exportFields['业务员'])
+              row['业务员'] = customer.salesman || '';
+            if (exportFields['业务员电话'])
+              row['业务员电话'] = customer.salesman_phone || '';
+            if (exportFields['业务员邮箱'])
+              row['业务员邮箱'] = customer.salesman_email || '';
+            if (exportFields['踏勘员'])
+              row['踏勘员'] = customer.surveyor || '';
+            if (exportFields['踏勘员电话'])
+              row['踏勘员电话'] = customer.surveyor_phone || '';
+            if (exportFields['踏勘员邮箱'])
+              row['踏勘员邮箱'] = customer.surveyor_email || '';
+            if (exportFields['补充资料'])
+              row['补充资料'] = Array.isArray(customer.station_management) 
+                ? customer.station_management.join('、') 
+                : (typeof customer.station_management === 'string' ? customer.station_management : '');
+            if (exportFields['备案日期']) {
+              // 处理备案日期格式
+              if (customer.filing_date && customer.filing_date !== '') {
+                if (dayjs(customer.filing_date).isValid()) {
+                  row['备案日期'] = dayjs(customer.filing_date).format('YYYY-MM-DD');
+                } else {
+                  row['备案日期'] = customer.filing_date; // 如果不是有效日期，直接使用原始值
+                }
+              } else {
+                row['备案日期'] = '';
+              }
+            }
+            if (exportFields['电表号码'])
+              row['电表号码'] = customer.meter_number || '';
+            if (exportFields['设计师'])
+              row['设计师'] = customer.designer || '';
+            if (exportFields['设计师电话'])
+              row['设计师电话'] = customer.designer_phone || '';
+            if (exportFields['图纸变更'])
+              row['图纸变更'] = customer.drawing_change || '未出图';
+            if (exportFields['催单']) {
+              if (customer.urge_order && dayjs(customer.urge_order).isValid()) {
+                row['催单'] = dayjs(customer.urge_order).format('YYYY-MM-DD HH:mm');
+              } else {
+                row['催单'] = '';
+              }
+            }
+            if (exportFields['容量(KW)'])
+              row['容量(KW)'] = customer.capacity || '';
+            if (exportFields['投资金额'])
+              row['投资金额'] = customer.investment_amount || '';
+            if (exportFields['用地面积(m²)'])
+              row['用地面积(m²)'] = customer.land_area || '';
+            if (exportFields['组件数量'])
+              row['组件数量'] = customer.module_count || '';
+            if (exportFields['逆变器'])
+              row['逆变器'] = customer.inverter || '';
+            if (exportFields['铜线'])
+              row['铜线'] = customer.copper_wire || '';
+            if (exportFields['铝线'])
+              row['铝线'] = customer.aluminum_wire || '';
+            if (exportFields['配电箱'])
+              row['配电箱'] = customer.distribution_box || '';
+            if (exportFields['方钢出库日期']) {
+              if (customer.square_steel_outbound_date === 'RETURNED') {
+                row['方钢出库日期'] = '退单';
+              } else if (customer.square_steel_outbound_date && dayjs(customer.square_steel_outbound_date).isValid()) {
+                row['方钢出库日期'] = dayjs(customer.square_steel_outbound_date).format('YYYY-MM-DD');
+              } else {
+                row['方钢出库日期'] = '';
+              }
+            }
+            if (exportFields['组件出库日期']) {
+              if (customer.component_outbound_date === 'RETURNED') {
+                row['组件出库日期'] = '退单';
+              } else if (customer.component_outbound_date && dayjs(customer.component_outbound_date).isValid()) {
+                row['组件出库日期'] = dayjs(customer.component_outbound_date).format('YYYY-MM-DD');
+              } else {
+                row['组件出库日期'] = '';
+              }
+            }
+            if (exportFields['派工日期']) {
+              if (customer.dispatch_date && dayjs(customer.dispatch_date).isValid()) {
+                row['派工日期'] = dayjs(customer.dispatch_date).format('YYYY-MM-DD');
+              } else {
+                row['派工日期'] = '';
+              }
+            }
+            if (exportFields['施工队'])
+              row['施工队'] = customer.construction_team || '';
+            if (exportFields['施工队电话'])
+              row['施工队电话'] = customer.construction_team_phone || '';
+            if (exportFields['施工状态']) {
+              if (customer.construction_status && dayjs(customer.construction_status).isValid()) {
+                row['施工状态'] = dayjs(customer.construction_status).format('YYYY-MM-DD');
+              } else {
+                row['施工状态'] = '';
+              }
+            }
+            if (exportFields['大线'])
+              row['大线'] = customer.main_line || '';
+            if (exportFields['技术审核']) {
+              // 技术审核特殊处理
+              if (customer.technical_review_status === 'approved') {
+                row['技术审核'] = customer.technical_review && dayjs(customer.technical_review).isValid() 
+                  ? dayjs(customer.technical_review).format('YYYY-MM-DD HH:mm') 
+                  : '已通过';
+              } else if (customer.technical_review_status === 'rejected') {
+                row['技术审核'] = '已拒绝';
+              } else if (customer.technical_review && dayjs(customer.technical_review).isValid()) {
+                row['技术审核'] = dayjs(customer.technical_review).format('YYYY-MM-DD HH:mm');
+              } else {
+                row['技术审核'] = '';
+              }
+            }
+            if (exportFields['上传国网']) {
+              if (customer.upload_to_grid && dayjs(customer.upload_to_grid).isValid()) {
+                row['上传国网'] = dayjs(customer.upload_to_grid).format('YYYY-MM-DD HH:mm');
+              } else {
+                row['上传国网'] = '';
+              }
+            }
+            if (exportFields['建设验收']) {
+              // 建设验收特殊处理
+              if (customer.construction_acceptance_status === 'completed') {
+                row['建设验收'] = customer.construction_acceptance && dayjs(customer.construction_acceptance).isValid() 
+                  ? dayjs(customer.construction_acceptance).format('YYYY-MM-DD HH:mm') 
+                  : '已完成';
+              } else if (customer.construction_acceptance_status === 'waiting') {
+                row['建设验收'] = '等待中';
+              } else if (customer.construction_acceptance && dayjs(customer.construction_acceptance).isValid()) {
+                row['建设验收'] = dayjs(customer.construction_acceptance).format('YYYY-MM-DD HH:mm');
+              } else if (customer.construction_acceptance && customer.construction_acceptance.startsWith('waiting:')) {
+                row['建设验收'] = '等待中';
+              } else {
+                row['建设验收'] = '';
+              }
+            }
+            if (exportFields['挂表日期']) {
+              if (customer.meter_installation_date && dayjs(customer.meter_installation_date).isValid()) {
+                row['挂表日期'] = dayjs(customer.meter_installation_date).format('YYYY-MM-DD HH:mm');
+              } else {
+                row['挂表日期'] = '';
+              }
+            }
+            if (exportFields['购售电合同']) {
+              if (customer.power_purchase_contract && dayjs(customer.power_purchase_contract).isValid()) {
+                row['购售电合同'] = dayjs(customer.power_purchase_contract).format('YYYY-MM-DD HH:mm');
+              } else {
+                row['购售电合同'] = '';
+              }
+            }
+            if (exportFields['状态'])
+              row['状态'] = customer.status || '';
+            if (exportFields['价格'])
+              row['价格'] = customer.price || '';
+            if (exportFields['公司'])
+              row['公司'] = customer.company === 'haoChen' ? '昊尘' : (customer.company === 'youZhi' ? '祐之' : customer.company || '');
+            if (exportFields['备注'])
+              row['备注'] = customer.remarks || '';
+            if (exportFields['创建时间']) {
+              if (customer.created_at && dayjs(customer.created_at).isValid()) {
+                row['创建时间'] = dayjs(customer.created_at).format('YYYY-MM-DD HH:mm:ss');
+              } else {
+                row['创建时间'] = '';
+              }
+            }
+            if (exportFields['最后更新']) {
+              if (customer.updated_at && dayjs(customer.updated_at).isValid()) {
+                row['最后更新'] = dayjs(customer.updated_at).format('YYYY-MM-DD HH:mm:ss');
+              } else {
+                row['最后更新'] = '';
+              }
+            }
+            
+            return row;
+          });
 
-      // 创建工作簿和工作表
-      const wb = XLSX.utils.book_new()
-      const ws = XLSX.utils.json_to_sheet(exportData)
+          // 添加工作表样式
+          const workbook = XLSX.utils.book_new();
+          const worksheet = XLSX.utils.json_to_sheet(exportData);
+          
+          // 设置列宽（自动调整为内容宽度）
+          const colWidths = [];
+          for (const key in exportData[0]) {
+            let maxWidth = key.length * 2; // 标题宽度
+            for (const row of exportData) {
+              const cellValue = row[key] ? String(row[key]) : '';
+              maxWidth = Math.max(maxWidth, cellValue.length * 1.5);
+            }
+            colWidths.push({ width: Math.min(60, maxWidth) }); // 最大宽度限制为60
+          }
+          worksheet['!cols'] = colWidths;
+          
+          // 添加表头样式
+          const headerRange = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+          for (let col = headerRange.s.c; col <= headerRange.e.c; col++) {
+            const cellRef = XLSX.utils.encode_cell({ r: 0, c: col });
+            if (!worksheet[cellRef]) continue;
+            
+            worksheet[cellRef].s = {
+              font: { bold: true },
+              fill: { fgColor: { rgb: "EFEFEF" } },
+              alignment: { horizontal: 'center', vertical: 'center' }
+            };
+          }
 
       // 将工作表添加到工作簿
-      XLSX.utils.book_append_sheet(wb, ws, '客户数据')
+          XLSX.utils.book_append_sheet(workbook, worksheet, '客户数据');
+
+          // 生成文件名（包含搜索条件）
+          let fileName = `客户数据_${dayjs().format('YYYY-MM-DD_HH-mm')}`;
+          if (searchText) {
+            fileName += `_搜索_${searchText.substring(0, 10)}`;
+          }
+          fileName += '.xlsx';
 
       // 保存文件
-      XLSX.writeFile(wb, `客户数据_${dayjs().format('YYYY-MM-DD_HH-mm')}.xlsx`)
-      message.success('导出成功')
+          XLSX.writeFile(workbook, fileName);
+          
+          // 显示成功消息
+          message.success(`成功导出 ${exportData.length} 条数据`);
+          
+          // 关闭导出模态框
+          setExportModalVisible(false);
     } catch (error) {
-      message.error('导出失败')
-      console.error(error)
+          console.error('导出数据时出错:', error);
+          message.error('导出失败: ' + (error instanceof Error ? error.message : '未知错误'));
+        } finally {
+          setExportLoading(false);
+        }
+      }, 100);
+    } catch (error) {
+      message.error('导出准备失败');
+      console.error(error);
+      setExportLoading(false);
     }
-  }
+  };
 
   // 处理导入配置
   const uploadProps: UploadProps = {
@@ -1268,7 +1552,7 @@ const CustomerList = () => {
               console.log('选择图纸变更值:', value, '类型:', typeof value);
               // 如果为空，设置为默认值
               if (value === null || value === undefined || value === '') {
-                editForm.setFieldsValue({ drawing_change: '无变更' });
+                editForm.setFieldsValue({ drawing_change: '未出图' });
               }
             }
           }}
@@ -1761,7 +2045,7 @@ const CustomerList = () => {
         if (isEditing(record, 'drawing_change')) {
           return (
             <EditableSelectCell 
-              value={value || '无变更'} 
+              value={value || '未出图'} 
               record={record} 
               dataIndex="drawing_change" 
               title="图纸变更" 
@@ -1770,7 +2054,7 @@ const CustomerList = () => {
           );
         }
         
-        // 获取当前选项，默认为"无变更"
+        // 获取当前选项，默认为"未出图"
         const option = DRAWING_CHANGE_OPTIONS.find(o => o.value === value) || DRAWING_CHANGE_OPTIONS[0];
         
         // 定义按钮颜色映射
@@ -1822,8 +2106,8 @@ const CustomerList = () => {
         );
       },
       sorter: (a, b) => {
-        const valA = typeof a.drawing_change === 'string' ? a.drawing_change : '无变更';
-        const valB = typeof b.drawing_change === 'string' ? b.drawing_change : '无变更';
+        const valA = typeof a.drawing_change === 'string' ? a.drawing_change : '未出图';
+        const valB = typeof b.drawing_change === 'string' ? b.drawing_change : '未出图';
         return valA.localeCompare(valB);
       },
       ellipsis: true,
@@ -2491,9 +2775,9 @@ const CustomerList = () => {
               const totalWaitDays = waitDays + elapsedDays;
               
               displayText = `已等待 ${totalWaitDays} 天`;
-            }
-          } catch (error) {
-            console.error('计算等待天数错误:', error);
+                }
+              } catch (error) {
+                console.error('计算等待天数错误:', error);
           }
           
           return (
@@ -2787,17 +3071,17 @@ const CustomerList = () => {
               />
             </Tooltip>
             <Tooltip title="删除客户">
-              <Button 
+          <Button 
                 type="primary"
                 danger
                 ghost
-                size="small"
-                icon={<DeleteOutlined />}
+            size="small"
+                icon={<DeleteOutlined />} 
                 onClick={() => handleDelete(record.id, record.customer_name)}
-              />
+          />
             </Tooltip>
           </Space>
-        );
+    );
       },
     },
   ];
@@ -3448,7 +3732,7 @@ const CustomerList = () => {
           </Button>
           <Button 
             icon={<ExportOutlined />} 
-            onClick={handleExport}
+            onClick={showExportModal}
           >
           导出数据
           </Button>
@@ -3821,7 +4105,7 @@ const CustomerList = () => {
       
       // 使用Record<string, any>类型绕过类型检查
       const updateData: Record<string, any> = {
-        drawing_change: newValue || '无变更'
+        drawing_change: newValue || '未出图'
       };
       
       // 使用updateWithCache方法异步更新，绕过类型检查
@@ -3832,7 +4116,7 @@ const CustomerList = () => {
         prev.map(customer => {
           if (customer.id === recordId) {
             const updatedCustomer = { ...customer } as any;
-            updatedCustomer.drawing_change = newValue || '无变更';
+            updatedCustomer.drawing_change = newValue || '未出图';
             return updatedCustomer;
           }
           return customer;
@@ -3843,7 +4127,7 @@ const CustomerList = () => {
         prev.map(customer => {
           if (customer.id === recordId) {
             const updatedCustomer = { ...customer } as any;
-            updatedCustomer.drawing_change = newValue || '无变更';
+            updatedCustomer.drawing_change = newValue || '未出图';
             return updatedCustomer;
           }
           return customer;
@@ -3851,7 +4135,7 @@ const CustomerList = () => {
       );
       
       // 显示操作结果
-      message.success(`图纸变更状态已更新为"${newValue || '无变更'}"`);
+      message.success(`图纸变更状态已更新为"${newValue || '未出图'}"`);
     } catch (error) {
       console.error('更新图纸变更状态失败:', error);
       message.error('更新图纸变更状态失败');
@@ -4415,6 +4699,44 @@ const CustomerList = () => {
           </div>
         )}
       </Drawer>
+      
+      {/* 导出选项模态框 */}
+      <Modal
+        title="选择导出字段"
+        open={exportModalVisible}
+        onCancel={() => setExportModalVisible(false)}
+        footer={[
+          <Button key="cancel" onClick={() => setExportModalVisible(false)}>
+            取消
+          </Button>,
+          <Button key="exportAll" onClick={selectAllExportFields}>
+            全选
+          </Button>,
+          <Button key="deselectAll" onClick={deselectAllExportFields}>
+            取消全选
+          </Button>,
+          <Button key="export" type="primary" loading={exportLoading} onClick={handleExportWithFields}>
+            导出
+          </Button>,
+        ]}
+        width={700}
+      >
+        <div style={{ maxHeight: '60vh', overflow: 'auto', padding: '10px 0' }}>
+          <Row gutter={[16, 8]}>
+            {Object.keys(exportFields).map(field => (
+              <Col span={8} key={field}>
+                <Checkbox
+                  checked={exportFields[field]}
+                  onChange={e => handleExportFieldChange(field, e.target.checked)}
+                  disabled={field === '客户姓名'} // 客户姓名字段必选
+                >
+                  {field}
+                </Checkbox>
+              </Col>
+            ))}
+          </Row>
+        </div>
+      </Modal>
     </div>
   )
 }

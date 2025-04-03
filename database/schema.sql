@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS customers (
   filing_date TIMESTAMP WITH TIME ZONE,
   meter_number TEXT,
   designer TEXT,
-  drawing_change TEXT DEFAULT '无变更',
+  drawing_change TEXT DEFAULT '未出图',
   urge_order TEXT,
   capacity NUMERIC(10, 2),
   investment_amount NUMERIC(10, 2),

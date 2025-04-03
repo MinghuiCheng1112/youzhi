@@ -40,7 +40,7 @@ const CARD_STYLE = {
 
 // 添加图纸变更选项
 const DRAWING_CHANGE_OPTIONS = [
-  { value: '无变更', label: '无变更', color: 'default' },
+  { value: '未出图', label: '未出图', color: 'default' },
   { value: '变更1', label: '变更1', color: 'blue' },
   { value: '变更2', label: '变更2', color: 'purple' },
   { value: '变更3', label: '变更3', color: 'orange' },
@@ -1108,10 +1108,12 @@ const ConstructionTeamDashboard = () => {
         if (value === true) {
           textValue = '变更1';
         } else if (value === false) {
-          textValue = '无变更';
+          textValue = '未出图';
+        } else if (value === null || value === undefined) {
+          textValue = '未出图';
         }
         
-        // 获取当前选项，默认为"无变更"
+        // 获取当前选项，默认为"未出图"
         const option = DRAWING_CHANGE_OPTIONS.find(o => o.value === textValue) || DRAWING_CHANGE_OPTIONS[0];
         
         // 定义按钮颜色映射
@@ -1148,8 +1150,8 @@ const ConstructionTeamDashboard = () => {
         );
       },
       sorter: (a: Customer, b: Customer) => {
-        const valA = typeof a.drawing_change === 'string' ? a.drawing_change : (a.drawing_change === true ? '变更1' : '无变更');
-        const valB = typeof b.drawing_change === 'string' ? b.drawing_change : (b.drawing_change === true ? '变更1' : '无变更');
+        const valA = typeof a.drawing_change === 'string' ? a.drawing_change : (a.drawing_change === true ? '变更1' : '未出图');
+        const valB = typeof b.drawing_change === 'string' ? b.drawing_change : (b.drawing_change === true ? '变更1' : '未出图');
         return valA.localeCompare(valB);
       },
     },

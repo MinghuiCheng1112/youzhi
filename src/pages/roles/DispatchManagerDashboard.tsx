@@ -519,7 +519,7 @@ const DispatchManagerDashboard = () => {
           size="small"
           danger={!!record.urge_order}
         >
-          {record.dispatch_date ? '修改派工' : '派工'}
+          {record.construction_team ? '修改派工状态' : (record.dispatch_date ? '修改派工' : '派工')}
           {record.urge_order ? ' (催单)' : ''}
         </Button>
       ),
