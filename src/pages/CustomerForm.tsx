@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Form, Input, Button, message, Card, DatePicker, InputNumber, Switch, Select, Checkbox, Space, Typography, Row, Col, Divider, Tag, Modal } from 'antd'
 import { useNavigate, useParams } from 'react-router-dom'
-import { customerApi } from '../services/api'
+import { customerApi, constructionTeamApi, surveyorApi } from '../services/api'
 import { Customer } from '../types'
 import { useAuth } from '../contexts/AuthContext'
 import dayjs from 'dayjs'
@@ -21,6 +21,8 @@ const CustomerForm = () => {
   const navigate = useNavigate()
   const { user, userRole } = useAuth()
   const isEdit = !!id
+  const [constructionTeams, setConstructionTeams] = useState<{name: string, phone: string}[]>([])
+  const [surveyors, setSurveyors] = useState<{name: string, phone: string}[]>([])
 
   // 补充资料选项
   const stationManagementOptions = [
@@ -33,6 +35,27 @@ const CustomerForm = () => {
     { label: '合同', value: '合同' },
   ]
 
+  // 获取施工队和踏勘员列表
+  useEffect(() => {
+    const fetchTeamsAndSurveyors = async () => {
+      try {
+        // 获取施工队列表
+        const teams = await constructionTeamApi.getFromUserRoles();
+        console.log('获取到的施工队列表:', teams);
+        setConstructionTeams(teams);
+
+        // 获取踏勘员列表
+        const surveyorList = await surveyorApi.getAll();
+        console.log('获取到的踏勘员列表:', surveyorList);
+        setSurveyors(surveyorList);
+      } catch (error) {
+        console.error('获取施工队或踏勘员列表失败:', error);
+      }
+    };
+
+    fetchTeamsAndSurveyors();
+  }, []);
+
   // 获取客户数据
   useEffect(() => {
     const fetchCustomer = async () => {
@@ -43,6 +66,7 @@ const CustomerForm = () => {
         const data = await customerApi.getById(id)
         if (data) {
           setCustomer(data)
+          console.log('获取到的客户数据:', data);
           
           // 格式化日期字段
           const formattedData = {
@@ -108,6 +132,35 @@ const CustomerForm = () => {
       
       // 不再将公司字段转换为中文，保持原始值
       console.log('公司字段值:', formattedValues.company);
+      
+      // 处理空字段，确保相关字段一致清空
+      // 如果设计师为空，确保设计师电话也为空
+      if (!formattedValues.designer) {
+        formattedValues.designer = null;
+        formattedValues.designer_phone = null;
+        console.log('设计师为空，将设计师电话设为null');
+      }
+      
+      // 如果踏勘员为空，确保踏勘员电话也为空
+      if (!formattedValues.surveyor) {
+        formattedValues.surveyor = null;
+        formattedValues.surveyor_phone = null;
+        console.log('踏勘员为空，将踏勘员电话设为null');
+      }
+      
+      // 如果施工队为空，确保施工队电话也为空
+      if (!formattedValues.construction_team) {
+        formattedValues.construction_team = null;
+        formattedValues.construction_team_phone = null;
+        console.log('施工队为空，将施工队电话设为null');
+      }
+      
+      // 如果业务员为空，确保业务员电话也为空
+      if (!formattedValues.salesman) {
+        formattedValues.salesman = null;
+        formattedValues.salesman_phone = null;
+        console.log('业务员为空，将业务员电话设为null');
+      }
       
       // 如果是踏勘员创建客户，获取踏勘员信息并关联
       if (!isEdit && userRole === 'surveyor' && user?.email) {
@@ -785,7 +838,30 @@ const CustomerForm = () => {
               name="construction_team"
               label="施工队"
             >
-              <Input disabled placeholder="自动关联抽签工作台" />
+              <Select 
+                placeholder="请选择施工队" 
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                disabled={!canEdit()}
+                onChange={(value, option: any) => {
+                  console.log('选择施工队:', value, option);
+                  // 如果选择了施工队，自动填充电话
+                  if (value && option && option.phone) {
+                    form.setFieldsValue({ construction_team_phone: option.phone });
+                  } else if (!value) {
+                    // 如果清空了施工队，也清空电话（设置为null而不是空字符串）
+                    form.setFieldsValue({ construction_team_phone: null });
+                    console.log('清空施工队，将电话设置为null');
+                  }
+                }}
+              >
+                {constructionTeams.map(team => (
+                  <Option key={team.name} value={team.name} phone={team.phone}>
+                    {team.name}
+                  </Option>
+                ))}
+              </Select>
             </Form.Item>
           </Col>
           
@@ -794,7 +870,7 @@ const CustomerForm = () => {
               name="construction_team_phone"
               label="施工队电话"
             >
-              <Input placeholder="请输入施工队电话" />
+              <Input placeholder="请输入施工队电话" disabled={!canEdit()} />
             </Form.Item>
           </Col>
           
@@ -921,6 +997,46 @@ const CustomerForm = () => {
                 <Option value="昊尘">昊尘</Option>
                 <Option value="祐之">祐之</Option>
               </Select>
+            </Form.Item>
+          </Col>
+          
+          <Col xs={24} sm={12} md={8}>
+            <Form.Item
+              name="surveyor"
+              label="踏勘员"
+            >
+              <Select 
+                placeholder="请选择踏勘员" 
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                disabled={!canEdit()}
+                onChange={(value, option: any) => {
+                  console.log('选择踏勘员:', value, option);
+                  // 如果选择了踏勘员，自动填充电话
+                  if (value && option && option.phone) {
+                    form.setFieldsValue({ surveyor_phone: option.phone });
+                  } else if (!value) {
+                    // 如果清空了踏勘员，也清空电话
+                    form.setFieldsValue({ surveyor_phone: '' });
+                  }
+                }}
+              >
+                {surveyors.map(surveyor => (
+                  <Option key={surveyor.name} value={surveyor.name} phone={surveyor.phone}>
+                    {surveyor.name}
+                  </Option>
+                ))}
+              </Select>
+            </Form.Item>
+          </Col>
+          
+          <Col xs={24} sm={12} md={8}>
+            <Form.Item
+              name="surveyor_phone"
+              label="踏勘员电话"
+            >
+              <Input disabled={!canEdit()} />
             </Form.Item>
           </Col>
           

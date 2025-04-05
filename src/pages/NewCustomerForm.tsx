@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Form, Input, Button, message, Card, DatePicker, InputNumber, Select, Checkbox, Typography, Row, Col, Divider, Spin } from 'antd'
 import { useNavigate } from 'react-router-dom'
-import { customerApi } from '../services/api'
+import { customerApi, constructionTeamApi, surveyorApi } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import dayjs from 'dayjs'
 import { calculateAllFields } from '../utils/calculationUtils'
@@ -28,6 +28,53 @@ const NewCustomerForm = () => {
   const [calculatingFields, setCalculatingFields] = useState(false)
   const navigate = useNavigate()
   const { user, userRole } = useAuth()
+  const [constructionTeams, setConstructionTeams] = useState<{name: string, phone: string}[]>([])
+  const [surveyors, setSurveyors] = useState<{name: string, phone: string}[]>([])
+
+  // 获取施工队和踏勘员列表
+  useEffect(() => {
+    const fetchTeamsAndSurveyors = async () => {
+      try {
+        // 获取施工队列表
+        const teamList = await constructionTeamApi.getFromUserRoles();
+        console.log('新建表单获取到的施工队列表:', teamList);
+        setConstructionTeams(teamList);
+        
+        // 踏勘员数据现在通过独立的fetchSurveyors函数获取
+      } catch (error) {
+        console.error('获取施工队列表失败:', error);
+        message.error('获取施工队列表失败');
+      }
+    };
+    
+    // 获取施工队数据
+    fetchTeamsAndSurveyors();
+    
+    // 获取踏勘员数据
+    fetchSurveyors();
+  }, []);
+
+  // 获取踏勘员列表
+  const fetchSurveyors = async () => {
+    try {
+      console.log('开始获取踏勘员数据...');
+      
+      // 使用getAll方法获取所有来源的踏勘员数据
+      const surveyorList = await surveyorApi.getAll();
+      console.log('获取到的踏勘员数据:', surveyorList);
+      
+      if (surveyorList && surveyorList.length > 0) {
+        setSurveyors(surveyorList);
+      } else {
+        console.log('无法获取踏勘员数据，使用空列表');
+        setSurveyors([]);
+      }
+    } catch (error) {
+      console.error('获取踏勘员列表失败:', error);
+      message.error('获取踏勘员列表失败');
+      setSurveyors([]);
+    }
+  };
 
   // 处理组件数量变更
   const handleModuleCountChange = (value: number | null) => {
@@ -71,6 +118,35 @@ const NewCustomerForm = () => {
         // 设置初始状态
         technical_review_status: 'pending',
         construction_acceptance_status: 'pending',
+      }
+      
+      // 处理空字段，确保相关字段一致清空
+      // 如果设计师为空，确保设计师电话也为空
+      if (!formattedValues.designer) {
+        formattedValues.designer = null;
+        formattedValues.designer_phone = null;
+        console.log('设计师为空，将设计师电话设为null');
+      }
+      
+      // 如果踏勘员为空，确保踏勘员电话也为空
+      if (!formattedValues.surveyor) {
+        formattedValues.surveyor = null;
+        formattedValues.surveyor_phone = null;
+        console.log('踏勘员为空，将踏勘员电话设为null');
+      }
+      
+      // 如果施工队为空，确保施工队电话也为空
+      if (!formattedValues.construction_team) {
+        formattedValues.construction_team = null;
+        formattedValues.construction_team_phone = null;
+        console.log('施工队为空，将施工队电话设为null');
+      }
+      
+      // 如果业务员为空，确保业务员电话也为空
+      if (!formattedValues.salesman) {
+        formattedValues.salesman = null;
+        formattedValues.salesman_phone = null;
+        console.log('业务员为空，将业务员电话设为null');
       }
       
       // 如果是踏勘员创建客户，获取踏勘员信息并关联
@@ -260,6 +336,90 @@ const NewCustomerForm = () => {
             <Form.Item 
               name="salesman_phone" 
               label="业务员电话"
+            >
+              <Input />
+            </Form.Item>
+          </Col>
+        </Row>
+
+        <Divider orientation="left">踏勘员信息</Divider>
+        <Row gutter={24}>
+          <Col xs={24} sm={12} md={12}>
+            <Form.Item 
+              name="surveyor" 
+              label="踏勘员"
+            >
+              <Select 
+                placeholder="请选择踏勘员" 
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                onChange={(value, option: any) => {
+                  console.log('新建表单选择踏勘员:', value, option);
+                  // 如果选择了踏勘员，自动填充电话
+                  if (value && option && option.phone) {
+                    form.setFieldsValue({ surveyor_phone: option.phone });
+                  } else if (!value) {
+                    // 如果清空了踏勘员，也清空电话（设置为null而不是空字符串）
+                    form.setFieldsValue({ surveyor_phone: null });
+                    console.log('清空踏勘员，将电话设置为null');
+                  }
+                }}
+              >
+                {surveyors.map(surveyor => (
+                  <Option key={surveyor.name} value={surveyor.name} phone={surveyor.phone}>
+                    {surveyor.name}
+                  </Option>
+                ))}
+              </Select>
+            </Form.Item>
+          </Col>
+          <Col xs={24} sm={12} md={12}>
+            <Form.Item 
+              name="surveyor_phone" 
+              label="踏勘员电话"
+            >
+              <Input />
+            </Form.Item>
+          </Col>
+        </Row>
+
+        <Divider orientation="left">施工队信息</Divider>
+        <Row gutter={24}>
+          <Col xs={24} sm={12} md={12}>
+            <Form.Item 
+              name="construction_team" 
+              label="施工队"
+            >
+              <Select 
+                placeholder="请选择施工队" 
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                onChange={(value, option: any) => {
+                  console.log('新建表单选择施工队:', value, option);
+                  // 如果选择了施工队，自动填充电话
+                  if (value && option && option.phone) {
+                    form.setFieldsValue({ construction_team_phone: option.phone });
+                  } else if (!value) {
+                    // 如果清空了施工队，也清空电话（设置为null而不是空字符串）
+                    form.setFieldsValue({ construction_team_phone: null });
+                    console.log('清空施工队，将电话设置为null');
+                  }
+                }}
+              >
+                {constructionTeams.map(team => (
+                  <Option key={team.name} value={team.name} phone={team.phone}>
+                    {team.name}
+                  </Option>
+                ))}
+              </Select>
+            </Form.Item>
+          </Col>
+          <Col xs={24} sm={12} md={12}>
+            <Form.Item 
+              name="construction_team_phone" 
+              label="施工队电话"
             >
               <Input />
             </Form.Item>

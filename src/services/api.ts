@@ -572,6 +572,55 @@ export const customerApi = {
     // 记录原始数据，帮助调试
     console.log(`updateWithCache原始数据(ID: ${id}):`, JSON.stringify(processedUpdates));
     
+    // 特殊处理设计师和踏勘员字段
+    // 如果设计师为空，确保设计师电话也为空
+    if ('designer' in processedUpdates && 
+        (processedUpdates.designer === null || processedUpdates.designer === undefined || processedUpdates.designer === '')) {
+      processedUpdates.designer = null; // 统一设为null
+      
+      // 如果没有明确设置设计师电话，同时设置为null
+      if (!('designer_phone' in processedUpdates)) {
+        processedUpdates.designer_phone = null;
+        console.log('设计师为空，自动将设计师电话设为null');
+      }
+    }
+    
+    // 如果踏勘员为空，确保踏勘员电话也为空
+    if ('surveyor' in processedUpdates && 
+        (processedUpdates.surveyor === null || processedUpdates.surveyor === undefined || processedUpdates.surveyor === '')) {
+      processedUpdates.surveyor = null; // 统一设为null
+      
+      // 如果没有明确设置踏勘员电话，同时设置为null
+      if (!('surveyor_phone' in processedUpdates)) {
+        processedUpdates.surveyor_phone = null;
+        console.log('踏勘员为空，自动将踏勘员电话设为null');
+      }
+    }
+    
+    // 如果施工队为空，确保施工队电话也为空
+    if ('construction_team' in processedUpdates && 
+        (processedUpdates.construction_team === null || processedUpdates.construction_team === undefined || processedUpdates.construction_team === '')) {
+      processedUpdates.construction_team = null; // 统一设为null
+      
+      // 如果没有明确设置施工队电话，同时设置为null
+      if (!('construction_team_phone' in processedUpdates)) {
+        processedUpdates.construction_team_phone = null;
+        console.log('施工队为空，自动将施工队电话设为null');
+      }
+    }
+    
+    // 如果业务员为空，确保业务员电话也为空
+    if ('salesman' in processedUpdates && 
+        (processedUpdates.salesman === null || processedUpdates.salesman === undefined || processedUpdates.salesman === '')) {
+      processedUpdates.salesman = null; // 统一设为null
+      
+      // 如果没有明确设置业务员电话，同时设置为null
+      if (!('salesman_phone' in processedUpdates)) {
+        processedUpdates.salesman_phone = null;
+        console.log('业务员为空，自动将业务员电话设为null');
+      }
+    }
+    
     // 如果module_count为空值，同时将相关计算字段设置为空值
     if ('module_count' in processedUpdates) {
       const moduleCount = (processedUpdates as any).module_count;
@@ -1343,9 +1392,50 @@ export const constructionTeamApi = {
    */
   getAll: async (): Promise<{name: string, phone: string}[]> => {
     try {
-      // 不再尝试从construction_teams表获取，而是调用getFromUserRoles方法
-      console.log('从user_roles表获取施工队信息');
-      return await constructionTeamApi.getFromUserRoles();
+      console.log('获取所有来源的施工队数据');
+      
+      // 从user_roles表获取施工队数据
+      const fromRoles = await constructionTeamApi.getFromUserRoles();
+      console.log('从user_roles获取的施工队数据数量:', fromRoles.length);
+      
+      // 从客户记录中获取施工队数据
+      const fromCustomers = await constructionTeamApi.getFromCustomers();
+      console.log('从客户记录获取的施工队数据数量:', fromCustomers.length);
+      
+      // 合并两个来源的数据（去重）
+      const uniqueTeams = new Map<string, {name: string, phone: string}>();
+      
+      // 添加角色数据
+      if (fromRoles && fromRoles.length > 0) {
+        fromRoles.forEach(team => {
+          uniqueTeams.set(team.name, team);
+        });
+      }
+      
+      // 添加客户记录中的数据，如果还没有添加过的话
+      if (fromCustomers && fromCustomers.length > 0) {
+        fromCustomers.forEach(team => {
+          if (!uniqueTeams.has(team.name)) {
+            uniqueTeams.set(team.name, team);
+          } else {
+            // 如果已存在但电话为空，则更新电话号码
+            const existing = uniqueTeams.get(team.name);
+            if (existing && !existing.phone && team.phone) {
+              uniqueTeams.set(team.name, {
+                ...existing,
+                phone: team.phone
+              });
+            }
+          }
+        });
+      }
+      
+      // 转换回数组并按名称排序
+      const allTeams = Array.from(uniqueTeams.values())
+        .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
+      
+      console.log('合并后的施工队数据总数:', allTeams.length);
+      return allTeams;
     } catch (error) {
       console.error('获取施工队列表失败:', error);
       // 如果获取失败，返回一个空数组
@@ -1365,7 +1455,7 @@ export const constructionTeamApi = {
       // 从user_roles表查询角色为construction_team的用户
       const { data, error } = await supabase
         .from('user_roles')
-        .select('name, phone, email')
+        .select('name, phone, email, user_id')
         .eq('role', 'construction_team')
         .order('name', { ascending: true });
       
@@ -1385,6 +1475,50 @@ export const constructionTeamApi = {
       console.error('获取user_roles施工队数据时出错:', err);
       return [];
     }
+  },
+  
+  /**
+   * 从客户记录中提取施工队信息
+   * 获取所有不同的施工队名称和电话
+   * @returns {Promise<{name: string, phone: string}[]>} 施工队信息数组
+   */
+  getFromCustomers: async (): Promise<{name: string, phone: string}[]> => {
+    try {
+      console.log('从客户记录中提取施工队信息');
+      
+      // 查询所有客户中的施工队信息
+      const { data, error } = await supabase
+        .from('customers')
+        .select('construction_team, construction_team_phone')
+        .not('construction_team', 'is', null)
+        .not('construction_team', 'eq', '')
+        .order('construction_team', { ascending: true });
+      
+      if (error) {
+        console.error('从客户记录中获取施工队数据失败:', error);
+        return [];
+      }
+      
+      // 去重并整理数据
+      const uniqueTeams = new Map<string, string>();
+      
+      (data || []).forEach(customer => {
+        if (customer.construction_team && !uniqueTeams.has(customer.construction_team)) {
+          uniqueTeams.set(customer.construction_team, customer.construction_team_phone || '');
+        }
+      });
+      
+      const result = Array.from(uniqueTeams.entries()).map(([name, phone]) => ({
+        name,
+        phone
+      }));
+      
+      console.log('从客户记录中提取的施工队数据:', result);
+      return result;
+    } catch (err) {
+      console.error('从客户记录提取施工队数据时出错:', err);
+      return [];
+    }
   }
 }
 
@@ -1402,7 +1536,7 @@ export const surveyorApi = {
       // 从user_roles表查询角色为surveyor的用户
       const { data, error } = await supabase
         .from('user_roles')
-        .select('name, phone, email')
+        .select('name, phone, email, user_id')
         .eq('role', 'surveyor')
         .order('name', { ascending: true });
       
@@ -1420,6 +1554,106 @@ export const surveyorApi = {
       }));
     } catch (err) {
       console.error('获取user_roles踏勘员数据时出错:', err);
+      return [];
+    }
+  },
+  
+  /**
+   * 从客户记录中提取踏勘员信息
+   * 获取所有不同的踏勘员名称和电话
+   * @returns {Promise<{name: string, phone: string}[]>} 踏勘员信息数组
+   */
+  getFromCustomers: async (): Promise<{name: string, phone: string}[]> => {
+    try {
+      console.log('从客户记录中提取踏勘员信息');
+      
+      // 查询所有客户中的踏勘员信息
+      const { data, error } = await supabase
+        .from('customers')
+        .select('surveyor, surveyor_phone')
+        .not('surveyor', 'is', null)
+        .not('surveyor', 'eq', '')
+        .order('surveyor', { ascending: true });
+      
+      if (error) {
+        console.error('从客户记录中获取踏勘员数据失败:', error);
+        return [];
+      }
+      
+      // 去重并整理数据
+      const uniqueSurveyors = new Map<string, string>();
+      
+      (data || []).forEach(customer => {
+        if (customer.surveyor && !uniqueSurveyors.has(customer.surveyor)) {
+          uniqueSurveyors.set(customer.surveyor, customer.surveyor_phone || '');
+        }
+      });
+      
+      const result = Array.from(uniqueSurveyors.entries()).map(([name, phone]) => ({
+        name,
+        phone
+      }));
+      
+      console.log('从客户记录中提取的踏勘员数据:', result);
+      return result;
+    } catch (err) {
+      console.error('从客户记录提取踏勘员数据时出错:', err);
+      return [];
+    }
+  },
+  
+  /**
+   * 获取所有踏勘员信息（合并从user_roles和客户记录中获取的数据）
+   * @returns {Promise<{name: string, phone: string}[]>} 踏勘员信息数组
+   */
+  getAll: async (): Promise<{name: string, phone: string}[]> => {
+    try {
+      console.log('获取所有来源的踏勘员数据');
+      
+      // 从user_roles表获取踏勘员数据
+      const fromRoles = await surveyorApi.getFromUserRoles();
+      console.log('从user_roles获取的踏勘员数据数量:', fromRoles.length);
+      
+      // 从客户记录中获取踏勘员数据
+      const fromCustomers = await surveyorApi.getFromCustomers();
+      console.log('从客户记录获取的踏勘员数据数量:', fromCustomers.length);
+      
+      // 合并两个来源的数据（去重）
+      const uniqueSurveyors = new Map<string, {name: string, phone: string}>();
+      
+      // 添加角色数据
+      if (fromRoles && fromRoles.length > 0) {
+        fromRoles.forEach(surveyor => {
+          uniqueSurveyors.set(surveyor.name, surveyor);
+        });
+      }
+      
+      // 添加客户记录中的数据，如果还没有添加过的话
+      if (fromCustomers && fromCustomers.length > 0) {
+        fromCustomers.forEach(surveyor => {
+          if (!uniqueSurveyors.has(surveyor.name)) {
+            uniqueSurveyors.set(surveyor.name, surveyor);
+          } else {
+            // 如果已存在但电话为空，则更新电话号码
+            const existing = uniqueSurveyors.get(surveyor.name);
+            if (existing && !existing.phone && surveyor.phone) {
+              uniqueSurveyors.set(surveyor.name, {
+                ...existing,
+                phone: surveyor.phone
+              });
+            }
+          }
+        });
+      }
+      
+      // 转换回数组并按名称排序
+      const allSurveyors = Array.from(uniqueSurveyors.values())
+        .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
+      
+      console.log('合并后的踏勘员数据总数:', allSurveyors.length);
+      return allSurveyors;
+    } catch (err) {
+      console.error('获取踏勘员数据时出错:', err);
       return [];
     }
   }
