@@ -3309,23 +3309,32 @@ const CustomerList = () => {
     }
     
     try {
-      setLoading(true);
-      
       // 如果当前有状态（已出合同），则恢复为待出状态
       // 如果当前没有状态（待出），则标记为已出合同
       const updateObj = {
         power_purchase_contract: currentStatus ? null : new Date().toISOString()
       };
       
-      await customerApi.update(id, updateObj);
+      console.log(`[购售电合同] 更新客户(${id})的购售电合同状态，采用缓存+异步模式`);
+      
+      // 使用数据缓存服务更新数据，UI立即响应
+      const updatedCustomer = customerApi.updateWithCache(id, updateObj);
+      
+      // 更新本地状态
+      setCustomers(prev => 
+        prev.map(c => (c.id === id ? { ...c, ...updatedCustomer } : c))
+      );
+      setFilteredCustomers(prev => 
+        prev.map(c => (c.id === id ? { ...c, ...updatedCustomer } : c))
+      );
       
       message.success(currentStatus ? '已恢复为待出状态' : '已标记为已出合同');
-      fetchCustomers(); // 刷新数据
     } catch (error) {
-      console.error('更新购售电合同状态失败:', error);
+      console.error('[购售电合同] 更新状态失败:', error);
       message.error('操作失败，请重试');
-    } finally {
-      setLoading(false);
+      
+      // 失败时重新获取数据
+      fetchCustomers();
     }
   };
 
