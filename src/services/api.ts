@@ -432,16 +432,35 @@ export const customerApi = {
       }
     });
     
-    // 后台静默创建客户
-    customerApi.create(processedCustomer)
-      .then(newCustomer => {
-        console.log('客户创建成功:', newCustomer);
-      })
-      .catch(error => {
-        console.error('后台创建客户失败:', error);
-      });
+    // 处理日期对象 - 确保日期被转换为ISO字符串
+    const dateFields = ['register_date'];
+    dateFields.forEach(field => {
+      if (field in processedCustomer && processedCustomer[field as keyof CreateCustomerInput]) {
+        const dateValue = processedCustomer[field as keyof CreateCustomerInput];
+        if (dateValue && typeof dateValue === 'object' && 'format' in dateValue) {
+          // dayjs对象转换为ISO字符串
+          try {
+            (processedCustomer as any)[field] = (dateValue as any).format('YYYY-MM-DD');
+            console.log(`将${field}字段从dayjs对象转换为字符串: ${(processedCustomer as any)[field]}`);
+          } catch (e) {
+            console.error(`转换${field}字段失败:`, e);
+            (processedCustomer as any)[field] = new Date().toISOString().split('T')[0];
+          }
+        }
+      }
+    });
     
-    return tempId;
+    console.log('创建客户最终数据:', JSON.stringify(processedCustomer));
+    
+    // 同步立即创建客户，不使用异步处理
+    try {
+      const result = await customerApi.create(processedCustomer);
+      console.log('客户创建成功，ID:', result.id);
+      return result.id;
+    } catch (error) {
+      console.error('客户创建失败:', error);
+      throw error;
+    }
   },
 
   /**

@@ -25,6 +25,7 @@ import type { ColumnsType, ColumnType } from 'antd/es/table'
 import { calculateAllFields } from '../utils/calculationUtils'
 import Draggable from 'react-draggable'
 import { supabase } from '../services/supabase';
+import { updateConstructionAcceptance } from '../services/api_fix'
 
 const { Title } = Typography
 const { confirm } = Modal
@@ -145,7 +146,7 @@ const CustomerList = () => {
       // 获取所有客户
       const data = await customerApi.getAll()
       
-      // 应用计算字段并确保waiting格式的建设验收数据正确处理
+      // 应用计算字段
       const processedData = data.map(customer => {
         // 处理计算字段
         let processedCustomer = { ...customer };
@@ -155,31 +156,6 @@ const CustomerList = () => {
             ...processedCustomer,
             ...calculatedFields
           };
-        }
-        
-        // 特殊处理construction_acceptance字段，确保waiting格式在刷新后保留
-        if (typeof customer.construction_acceptance === 'string') {
-          // 如果以前是waiting格式但被后端误处理为日期字符串，尝试恢复
-          if (customer.construction_acceptance_notes && 
-              customer.construction_acceptance_notes.includes('等待中')) {
-            // 从notes中提取等待天数
-            const waitingMatch = customer.construction_acceptance_notes.match(/等待\s*(\d+)\s*天/);
-            const waitDays = waitingMatch ? parseInt(waitingMatch[1], 10) : 7;
-            
-            // 使用setDate提取原始日期或使用当前日期
-            let startDate = dayjs();
-            try {
-              if (dayjs(customer.construction_acceptance_date).isValid()) {
-                startDate = dayjs(customer.construction_acceptance_date);
-              }
-            } catch (error) {
-              console.warn('无法解析验收日期，使用当前日期');
-            }
-            
-            // 重新构造waiting格式
-            processedCustomer.construction_acceptance = `waiting:${waitDays}:${startDate.format('YYYY-MM-DD')}`;
-            console.log(`恢复客户(${customer.id})的等待状态: ${processedCustomer.construction_acceptance}`);
-          }
         }
         
         return processedCustomer;
@@ -1128,19 +1104,11 @@ const CustomerList = () => {
               }
             }
             if (exportFields['建设验收']) {
-              // 建设验收特殊处理
-              if (customer.construction_acceptance_status === 'completed') {
-                row['建设验收'] = customer.construction_acceptance && dayjs(customer.construction_acceptance).isValid() 
-                  ? dayjs(customer.construction_acceptance).format('YYYY-MM-DD HH:mm') 
-                  : '已完成';
-              } else if (customer.construction_acceptance_status === 'waiting') {
-                row['建设验收'] = '等待中';
-              } else if (customer.construction_acceptance && dayjs(customer.construction_acceptance).isValid()) {
-                row['建设验收'] = dayjs(customer.construction_acceptance).format('YYYY-MM-DD HH:mm');
-              } else if (customer.construction_acceptance && customer.construction_acceptance.startsWith('waiting:')) {
-                row['建设验收'] = '等待中';
+              // 建设验收简化处理
+              if (customer.construction_acceptance_date && dayjs(customer.construction_acceptance_date).isValid()) {
+                row['建设验收'] = dayjs(customer.construction_acceptance_date).format('YYYY-MM-DD HH:mm');
               } else {
-                row['建设验收'] = '';
+                row['建设验收'] = '未推到';
               }
             }
             if (exportFields['挂表日期']) {
@@ -2661,110 +2629,44 @@ const CustomerList = () => {
     },
     {
       title: '建设验收',
-      dataIndex: 'construction_acceptance_status',
-      key: 'construction_acceptance_status',
+      dataIndex: 'construction_acceptance_date',
+      key: 'construction_acceptance_date',
       width: 130,
       align: 'center' as const,
       render: (text, record) => {
         // 如果已完成验收
-        if (text === 'completed') {
-          // 只有管理员可以将已验收恢复为未验收
-          const canReset = userRole === 'admin';
-          
-          let displayText = '已验收';
-          try {
-            // 检查日期有效性
-            if (record.construction_acceptance_date && dayjs(record.construction_acceptance_date).isValid()) {
-              displayText = dayjs(record.construction_acceptance_date).format('YYYY-MM-DD HH:mm');
-            }
-          } catch (error) {
-            console.error('建设验收日期格式化错误:', error);
-          }
-          
+        if (text) {
           return (
-            <Tooltip title={canReset ? '点击恢复为未验收状态' : '验收时间'}>
+            <Tooltip title='点击恢复为未推到状态'>
               <Tag 
                 color="green" 
-                style={{ cursor: canReset ? 'pointer' : 'default' }}
-                onClick={() => canReset && record.id && handleConstructionAcceptanceChange(record.id, 'reset')}
+                style={{ cursor: 'pointer' }}
+                onClick={() => record.id && handleConstructionAcceptanceChange(record.id, text)}
               >
-                <ClockCircleOutlined /> {displayText}
-              </Tag>
-            </Tooltip>
-          );
-        } else if (text === 'waiting') {
-          // 等待中状态
-          const waitDays = record.construction_acceptance_waiting_days || 0;
-          let startDate = dayjs();
-          let displayText = '等待中';
-          
-          try {
-            if (record.construction_acceptance_waiting_start && 
-                dayjs(record.construction_acceptance_waiting_start).isValid()) {
-              startDate = dayjs(record.construction_acceptance_waiting_start);
-              
-              // 计算从开始日期至今已等待天数
-              const elapsedDays = dayjs().diff(startDate, 'day');
-              // 计算当前累计等待天数
-              const totalWaitDays = waitDays + elapsedDays;
-              
-              displayText = `已等待 ${totalWaitDays} 天`;
-                }
-              } catch (error) {
-                console.error('计算等待天数错误:', error);
-          }
-          
-          return (
-            <Tooltip title="等待中">
-              <Tag 
-                color="orange" 
-                style={{ cursor: userRole === 'admin' ? 'pointer' : 'default' }}
-                onClick={() => userRole === 'admin' && record.id && handleConstructionAcceptanceChange(record.id, 'reset')}
-              >
-                <ClockCircleOutlined /> {displayText}
+                <ClockCircleOutlined /> {dayjs(text).format('YYYY-MM-DD HH:mm')}
               </Tag>
             </Tooltip>
           );
         } else {
-          // 未验收状态，显示按钮
+          // 未推到状态，显示按钮
           return (
             <Button 
               type="primary" 
               size="small"
               danger
               ghost
-              onClick={() => record.id && showConstructionAcceptanceOptions(record.id)}
+              onClick={() => record.id && handleConstructionAcceptanceChange(record.id, null)}
             >
-              未验收
+              未推到
             </Button>
           );
         }
       },
       sorter: (a, b) => {
-        // 排序顺序：未验收 < 等待中 < 已完成
-        const statusOrder = { 'pending': 0, 'waiting': 1, 'completed': 2 };
-        const aValue = statusOrder[a.construction_acceptance_status || 'pending'] || 0;
-        const bValue = statusOrder[b.construction_acceptance_status || 'pending'] || 0;
-        
-        if (aValue !== bValue) {
-          return aValue - bValue;
-        }
-        
-        // 如果状态相同，根据日期排序
-        try {
-          if (!a.construction_acceptance_date && !b.construction_acceptance_date) return 0;
-          if (!a.construction_acceptance_date) return -1;
-          if (!b.construction_acceptance_date) return 1;
-          
-          const aTime = dayjs(a.construction_acceptance_date).isValid() ? 
-            new Date(a.construction_acceptance_date).getTime() : 0;
-          const bTime = dayjs(b.construction_acceptance_date).isValid() ? 
-            new Date(b.construction_acceptance_date).getTime() : 0;
-          return aTime - bTime;
-        } catch (e) {
-          console.error('排序日期错误:', e);
-          return 0;
-        }
+        if (!a.construction_acceptance_date && !b.construction_acceptance_date) return 0;
+        if (!a.construction_acceptance_date) return -1;
+        if (!b.construction_acceptance_date) return 1;
+        return new Date(a.construction_acceptance_date).getTime() - new Date(b.construction_acceptance_date).getTime();
       },
       ellipsis: true,
     },
@@ -3355,130 +3257,47 @@ const CustomerList = () => {
     }
   };
 
-  // 处理建设验收状态变更
-  const handleConstructionAcceptanceChange = async (id: string | undefined, status: 'reset' | string | null, days?: number) => {
+  // 处理建设验收状态变更 - 简化版本，使用安全API
+  const handleConstructionAcceptanceChange = async (id: string | undefined, currentDate: string | null) => {
     if (!id) {
       message.error('客户ID无效');
       return;
     }
     
     try {
-      const now = dayjs();
-      let updateObj: Record<string, any> = {};
+      // 切换建设验收状态，当前有值则清空，无值则设置为当前日期
+      const updateObj: Record<string, any> = {
+        construction_acceptance_date: currentDate ? null : new Date().toISOString()
+      };
       
-      if (status === 'reset') {
-        // 如果是重置操作，则设置为待验收状态
-        updateObj = {
-          construction_acceptance_status: 'pending',
-          construction_acceptance_date: null,
-          construction_acceptance_notes: null,
-          construction_acceptance_waiting_days: null,
-          construction_acceptance_waiting_start: null
-        };
-      } else if (days) {
-        // 如果选择了等待天数选项，设置为等待状态
-        updateObj = {
-          construction_acceptance_status: 'waiting',
-          construction_acceptance_date: now.toISOString(),
-          construction_acceptance_notes: `等待中 - 设置于 ${now.format('YYYY-MM-DD HH:mm:ss')}`,
-          construction_acceptance_waiting_days: days,
-          construction_acceptance_waiting_start: now.toISOString()
-        };
-      } else {
-        // 如果未验收且没有设置等待天数，则标记为验收完成
-        updateObj = {
-          construction_acceptance_status: 'completed',
-          construction_acceptance_date: now.toISOString(),
-          construction_acceptance_notes: '今日验收完成',
-          construction_acceptance_waiting_days: null,
-          construction_acceptance_waiting_start: null
-        };
-      }
+      console.log(`[建设验收] 更新客户(${id})的建设验收状态，采用缓存+异步模式`);
       
-      // 使用数据缓存服务更新数据
-      customerApi.updateWithCache(id, updateObj);
+      // 使用数据缓存服务更新数据，UI立即响应
+      const updatedCustomer = customerApi.updateWithCache(id, updateObj);
       
-      // 更新本地状态 - 使用updateObj而非updatedCustomer，确保UI立即更新
+      // 更新本地状态
       setCustomers(prev => 
-        prev.map(customer => (customer.id === id ? { ...customer, ...updateObj } : customer))
+        prev.map(c => (c.id === id ? { ...c, ...updatedCustomer } : c))
       );
       setFilteredCustomers(prev => 
-        prev.map(customer => (customer.id === id ? { ...customer, ...updateObj } : customer))
+        prev.map(c => (c.id === id ? { ...c, ...updatedCustomer } : c))
       );
       
-      const successMsg = status === 'reset' ? '已重置验收状态' : 
-                         days ? `已设置为等待 ${days} 天` : 
-                         '已标记为验收完成';
+      // 显示成功消息
+      const successMsg = currentDate ? '已重置为未推到状态' : '已标记为推到完成';
       message.success(successMsg);
     } catch (error) {
-      console.error('更新验收状态失败:', error);
+      console.error('[建设验收] 操作过程出错:', error);
+      
+      if (error instanceof Error) {
+        message.error(`更新失败: ${error.message}`);
+      } else {
       message.error('操作失败，请重试');
     }
-  };
-
-  // 显示建设验收选项对话框
-  const showConstructionAcceptanceOptions = (id: string | undefined) => {
-    if (!id) {
-      console.error('无效的客户ID');
-      message.error('操作失败: 无效的客户ID');
-      return;
+      
+      // 失败时重新获取数据
+      fetchCustomers();
     }
-
-    let radioValue = 'now';
-    let waitDays = 7;
-    
-    Modal.confirm({
-      title: '设置建设验收状态',
-      width: 400,
-      icon: null,
-      content: (
-        <div>
-          <Radio.Group 
-            defaultValue="now" 
-            onChange={(e) => {
-              radioValue = e.target.value;
-              // 通过DOM更新输入框的显示/隐藏状态
-              const element = document.getElementById('waitDaysInputContainer');
-              if (element) {
-                element.style.display = radioValue === 'wait' ? 'block' : 'none';
-              }
-            }}
-          >
-            <Space direction="vertical">
-              <Radio value="now">立即标记为验收完成</Radio>
-              <Radio value="wait">设置等待天数</Radio>
-            </Space>
-          </Radio.Group>
-          <div id="waitDaysInputContainer" style={{ marginLeft: 24, marginTop: 10, display: 'none' }}>
-            <InputNumber 
-              min={1} 
-              max={999} 
-              defaultValue={7}
-              onChange={(value: number | null) => { 
-                waitDays = value ?? 7;
-              }}
-            /> 天
-          </div>
-        </div>
-      ),
-      okText: '确认',
-      cancelText: '取消',
-      async onOk() {
-        try {
-          if (radioValue === 'wait') {
-            // 设置等待天数
-            await handleConstructionAcceptanceChange(id, null, waitDays);
-          } else {
-            // 立即标记为已验收
-            await handleConstructionAcceptanceChange(id, null);
-          }
-          return Promise.resolve();
-        } catch (error) {
-          console.error('设置建设验收状态失败:', error);
-          return Promise.reject(error);
-        }
-      }
-    });
   };
 
   // 处理购售电合同状态变更

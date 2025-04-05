@@ -103,56 +103,32 @@ const NewCustomerForm = () => {
 
   // 提交表单
   const onFinish = async (values: any) => {
+    setLoading(true);
+    
     try {
-      setLoading(true)
-      
-      // 格式化日期字段
-      const formattedValues = {
+      // 处理日期
+      let formattedValues: any = {
         ...values,
-        register_date: values.register_date ? values.register_date.format() : new Date().toISOString(),
-        filing_date: values.filing_date || null,
-        // 处理补充资料字段 - 确保数组格式
-        station_management: Array.isArray(values.station_management) 
-          ? (values.station_management.length > 0 ? values.station_management : null)
-          : (values.station_management || null),
-        // 设置初始状态
-        technical_review_status: 'pending',
-        construction_acceptance_status: 'pending',
+        register_date: values.register_date ? values.register_date : null
+      };
+      
+      // 修正模块数量的处理，确保传递数字而非空字符串
+      const moduleCount = values.module_count ? Number(values.module_count) : null;
+      formattedValues.module_count = moduleCount;
+      
+      // 如果有模块数量，计算相关字段
+      if (moduleCount && moduleCount > 0) {
+        const calculatedFields = calculateAllFields(moduleCount);
+        formattedValues = {
+          ...formattedValues,
+          ...calculatedFields
+        };
       }
       
-      // 处理空字段，确保相关字段一致清空
-      // 如果设计师为空，确保设计师电话也为空
-      if (!formattedValues.designer) {
-        formattedValues.designer = null;
-        formattedValues.designer_phone = null;
-        console.log('设计师为空，将设计师电话设为null');
-      }
-      
-      // 如果踏勘员为空，确保踏勘员电话也为空
-      if (!formattedValues.surveyor) {
-        formattedValues.surveyor = null;
-        formattedValues.surveyor_phone = null;
-        console.log('踏勘员为空，将踏勘员电话设为null');
-      }
-      
-      // 如果施工队为空，确保施工队电话也为空
-      if (!formattedValues.construction_team) {
-        formattedValues.construction_team = null;
-        formattedValues.construction_team_phone = null;
-        console.log('施工队为空，将施工队电话设为null');
-      }
-      
-      // 如果业务员为空，确保业务员电话也为空
-      if (!formattedValues.salesman) {
-        formattedValues.salesman = null;
-        formattedValues.salesman_phone = null;
-        console.log('业务员为空，将业务员电话设为null');
-      }
-      
-      // 如果是踏勘员创建客户，获取踏勘员信息并关联
+      // 如果是踏勘员创建客户，自动关联当前踏勘员信息
       if (userRole === 'surveyor' && user?.email) {
         try {
-          // 尝试从user_roles表获取踏勘员姓名和电话
+          // 查询踏勘员信息
           const { data } = await supabase
             .from('user_roles')
             .select('name, phone')
@@ -161,12 +137,14 @@ const NewCustomerForm = () => {
             .single();
           
           if (data && data.name) {
-            // 使用数据库中的姓名
+            // 使用姓名作为显示名
             formattedValues.surveyor = data.name;
-            // 设置踏勘员电话，如果有的话
-            if (data.phone) {
+            
+            // 设置踏勘员电话
+            if (data.phone && !formattedValues.surveyor_phone) {
               formattedValues.surveyor_phone = data.phone;
             }
+            
             // 保存踏勘员邮箱，用于关联
             formattedValues.surveyor_email = user.email;
           } else {
@@ -225,27 +203,29 @@ const NewCustomerForm = () => {
       
       console.log('提交的客户数据:', formattedValues);
       
-      // 后台静默处理客户创建，不等待完成
-      customerApi.createWithCache(formattedValues)
-        .then(() => {
-          console.log('客户创建后台处理完成');
-        })
-        .catch(error => {
-          console.error('客户创建后台处理失败:', error);
-        });
-      
-      // 立即显示成功消息
-      message.success('客户添加成功');
-      
-      // 立即根据用户角色跳转到不同页面，不等待后台处理完成
-      if (userRole === 'surveyor') {
-        navigate('/surveyor');
-      } else if (userRole === 'salesman') {
-        navigate('/sales');
-      } else if (userRole === 'construction_team') {
-        navigate('/construction');
-      } else {
-        navigate('/customers');
+      // 等待客户创建完成
+      try {
+        await customerApi.create(formattedValues);
+        // 创建成功后显示消息
+        message.success('客户添加成功');
+        
+        // 根据用户角色跳转到不同页面
+        if (userRole === 'surveyor') {
+          navigate('/surveyor');
+        } else if (userRole === 'salesman') {
+          navigate('/sales');
+        } else if (userRole === 'construction_team') {
+          navigate('/construction');
+        } else {
+          navigate('/customers');
+        }
+      } catch (createError: any) {
+        console.error('客户创建失败:', createError);
+        if (createError.code === '23505') {
+          message.error('该客户已存在（姓名与电话重复）');
+        } else {
+          message.error(`客户创建失败: ${createError.message || '未知错误'}`);
+        }
       }
     } catch (error: any) {
       console.error('保存客户失败:', error);
