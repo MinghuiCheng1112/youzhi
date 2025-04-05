@@ -289,48 +289,18 @@ const CustomerList = () => {
     try {
       console.log('开始获取施工队数据...');
       
-      // 从user_roles表获取施工队数据
-      const teams = await constructionTeamApi.getFromUserRoles();
-      console.log('从user_roles获取到的施工队数据:', teams);
+      // 使用新的getAll方法获取所有来源的施工队数据
+      const teamList = await constructionTeamApi.getAll();
+      console.log('获取到的施工队数据:', teamList);
       
-      // 如果从user_roles获取的数据不为空，直接使用
-      if (teams && teams.length > 0) {
-        console.log('成功从user_roles获取施工队数据，使用该数据');
-        setConstructionTeams(teams);
+      if (teamList && teamList.length > 0) {
+        setConstructionTeams(teamList);
         return;
       }
       
-      console.log('从user_roles获取的数据为空，从客户记录中提取');
-      // 从客户数据中提取施工队信息
-      const uniqueTeams = new Map<string, string>();
-      
-      customers.forEach(customer => {
-        if (customer.construction_team && customer.construction_team.trim() !== '') {
-          uniqueTeams.set(
-            customer.construction_team,
-            customer.construction_team_phone || ''
-          );
-        }
-      });
-      
-      const extractedTeams = Array.from(uniqueTeams.entries()).map(([name, phone]) => ({
-        name,
-        phone
-      }));
-      
-      console.log('从客户记录中提取的施工队:', extractedTeams);
-      
-      if (extractedTeams.length > 0) {
-        setConstructionTeams(extractedTeams);
-        return;
-      }
-      
-      // 如果所有渠道都没有数据，使用默认值
-      console.log('所有渠道都没有数据，使用默认施工队数据');
-      setConstructionTeams([
-        { name: '北城施工队', phone: '13800138001' },
-        { name: '西城施工队', phone: '13800138002' }
-      ]);
+      // 如果getAll仍然获取不到数据，使用空列表
+      console.log('无法获取施工队数据，使用空列表');
+      setConstructionTeams([]);
     } catch (error) {
       console.error('获取施工队列表失败:', error);
       message.error('获取施工队列表失败');
@@ -345,44 +315,17 @@ const CustomerList = () => {
     try {
       console.log('开始获取踏勘员数据...');
       
-      // 从user_roles表获取踏勘员数据
-      const surveyorList = await surveyorApi.getFromUserRoles();
-      console.log('从user_roles获取到的踏勘员数据:', surveyorList);
+      // 使用新的getAll方法获取所有来源的踏勘员数据
+      const surveyorList = await surveyorApi.getAll();
+      console.log('获取到的踏勘员数据:', surveyorList);
       
-      // 如果从user_roles获取的数据不为空，直接使用
       if (surveyorList && surveyorList.length > 0) {
-        console.log('成功从user_roles获取踏勘员数据，使用该数据');
         setSurveyors(surveyorList);
         return;
       }
       
-      console.log('从user_roles获取的数据为空，从客户记录中提取');
-      // 从客户数据中提取踏勘员信息
-      const uniqueSurveyors = new Map<string, string>();
-      
-      customers.forEach(customer => {
-        if (customer.surveyor && customer.surveyor.trim() !== '') {
-          uniqueSurveyors.set(
-            customer.surveyor,
-            customer.surveyor_phone || ''
-          );
-        }
-      });
-      
-      const extractedSurveyors = Array.from(uniqueSurveyors.entries()).map(([name, phone]) => ({
-        name,
-        phone
-      }));
-      
-      console.log('从客户记录中提取的踏勘员:', extractedSurveyors);
-      
-      if (extractedSurveyors.length > 0) {
-        setSurveyors(extractedSurveyors);
-        return;
-      }
-      
-      // 如果所有渠道都没有数据，使用默认值
-      console.log('所有渠道都没有数据，使用默认踏勘员数据');
+      // 如果getAll仍然获取不到数据，回退到从customers表中查询（这是一个额外的保障）
+      console.log('无法获取踏勘员数据，使用空列表');
       setSurveyors([]);
     } catch (error) {
       console.error('获取踏勘员列表失败:', error);
@@ -408,7 +351,7 @@ const CustomerList = () => {
         console.error('获取设计师数据失败:', error);
         return;
       }
-
+      
       // 去重合并设计师信息
       const uniqueDesigners = new Map();
       data.forEach(item => {
@@ -584,6 +527,10 @@ const CustomerList = () => {
             updateData.designer_phone = designerInfo.phone;
             console.log('根据设计师名称自动设置电话:', designerInfo.phone);
           }
+        } else {
+          // 如果设计师被清空，也清空设计师电话
+          updateData.designer_phone = null;
+          console.log('设计师被清空，同时清空设计师电话');
         }
       }
       
@@ -601,6 +548,10 @@ const CustomerList = () => {
             updateData.surveyor_phone = surveyorInfo.phone;
             console.log('根据踏勘员名称自动设置电话:', surveyorInfo.phone);
           }
+        } else {
+          // 如果踏勘员被清空，也清空踏勘员电话
+          updateData.surveyor_phone = null;
+          console.log('踏勘员被清空，同时清空踏勘员电话');
         }
       }
       
@@ -2057,33 +2008,16 @@ const CustomerList = () => {
         // 获取当前选项，默认为"未出图"
         const option = DRAWING_CHANGE_OPTIONS.find(o => o.value === value) || DRAWING_CHANGE_OPTIONS[0];
         
-        // 定义按钮颜色映射
-        const btnTypeMap: Record<string, any> = {
-          'default': 'default',
-          'blue': 'primary',
-          'purple': 'primary',
-          'orange': 'warning',
-          'red': 'danger',
-          'volcano': 'danger'
-        };
-        
-        // 定义按钮风格映射
-        const btnStyleMap: Record<string, React.CSSProperties> = {
-          'default': { borderColor: '#d9d9d9', color: 'rgba(0, 0, 0, 0.88)' },
-          'blue': { borderColor: '#1677ff', color: '#1677ff' },
-          'purple': { borderColor: '#722ed1', color: '#722ed1' },
-          'orange': { borderColor: '#fa8c16', color: '#fa8c16' },
-          'red': { borderColor: '#f5222d', color: '#f5222d' },
-          'volcano': { borderColor: '#fa541c', color: '#fa541c' }
-        };
-        
         // 显示图纸变更选项下拉菜单
         const menu = (
           <Menu onClick={({ key }) => record.id && handleDrawingChangeClick(record.id, key as string)}>
-            {DRAWING_CHANGE_OPTIONS.map(option => (
-              <Menu.Item key={option.value}>
-                <Tag color={option.color} style={{ margin: 0 }}>
-                  {option.label}
+            {DRAWING_CHANGE_OPTIONS.map(opt => (
+              <Menu.Item key={opt.value}>
+                <Tag 
+                  color={opt.color === 'default' ? undefined : opt.color} 
+                  style={{ margin: 0 }}
+                >
+                  {opt.label}
                 </Tag>
               </Menu.Item>
             ))}
@@ -2093,14 +2027,14 @@ const CustomerList = () => {
         return (
           <div style={{ display: 'flex', justifyContent: 'center' }}>
             <Dropdown overlay={menu} trigger={['click']}>
-              <Button 
-              ghost
-              type={btnTypeMap[option.color] || 'default'}
-              style={btnStyleMap[option.color] || {}}
-                size="small"
+              <div style={{ cursor: 'pointer' }}>
+                <Tag 
+                  color={option.color === 'default' ? undefined : option.color}
+                  style={{ padding: '4px 8px' }}
             >
                 {option.label} <DownOutlined />
-            </Button>
+                </Tag>
+              </div>
             </Dropdown>
           </div>
         );
@@ -2516,7 +2450,7 @@ const CustomerList = () => {
       ellipsis: true,
       render: (value, record) => {
         console.log('渲染施工队字段:', record.id, value);
-        return <EditableCell value={value} record={record} dataIndex="construction_team" title="施工队" required={false} />;
+        return <ConstructionTeamCell value={value} record={record} />;
       }
     },
     {
@@ -3150,14 +3084,7 @@ const CustomerList = () => {
       phone: team.phone || ''
     }));
     
-    // 添加一个清空选项
-    constructionTeamOptions.unshift({
-      value: '',
-      label: '清空施工队',
-      phone: ''
-    });
-    
-    console.log('渲染施工队单元格:', value);
+    console.log('渲染施工队单元格:', value, '可用施工队选项:', constructionTeamOptions);
     
     return editable ? (
       <Form.Item
@@ -3174,6 +3101,7 @@ const CustomerList = () => {
           options={constructionTeamOptions}
           onBlur={() => record.id ? saveEditedCell(record.id) : undefined}
           onChange={(value, option) => {
+            console.log('选择施工队:', value, option);
             // 如果选择了施工队，自动填充电话
             if (value && typeof option === 'object' && 'phone' in option) {
               editForm.setFieldsValue({ construction_team_phone: option.phone });
@@ -3745,32 +3673,39 @@ const CustomerList = () => {
     const editable = isEditing(record, 'surveyor');
     const [hover, setHover] = useState(false);
     
-    // 将踏勘员数据转换为AutoComplete选项格式
+    // 将踏勘员数据转换为Select选项格式
     const surveyorOptions = surveyors.map(surveyor => ({
       value: surveyor.name,
       label: surveyor.name,
       phone: surveyor.phone || ''
     }));
     
+    console.log('渲染踏勘员单元格:', value, '可用踏勘员选项:', surveyorOptions);
+    
     return editable ? (
       <Form.Item
         name="surveyor"
         style={{ margin: 0 }}
+        initialValue={value}
       >
-        <AutoComplete
-          placeholder="请输入或选择踏勘员"
+        <Select
+          placeholder="请选择踏勘员"
           autoFocus
+          allowClear
+          showSearch
+          optionFilterProp="label"
           options={surveyorOptions}
           onBlur={() => record.id ? saveEditedCell(record.id) : undefined}
-          onSelect={(value, option: any) => {
+          onChange={(value, option) => {
+            console.log('选择踏勘员:', value, option);
             // 如果选择了踏勘员，自动填充电话
-            if (value && option && option.phone) {
+            if (value && typeof option === 'object' && 'phone' in option) {
               editForm.setFieldsValue({ surveyor_phone: option.phone });
+            } else if (!value) {
+              // 如果清空了踏勘员，也清空电话
+              editForm.setFieldsValue({ surveyor_phone: '' });
             }
           }}
-          filterOption={(inputValue, option) =>
-            option!.value.toString().toLowerCase().indexOf(inputValue.toLowerCase()) !== -1
-          }
         />
       </Form.Item>
     ) : (
@@ -3819,9 +3754,10 @@ const CustomerList = () => {
         style={{ margin: 0 }}
       >
         <Input 
-          placeholder="请输入踏勘员电话"
+          placeholder="踏勘员电话" 
           onPressEnter={() => record.id ? saveEditedCell(record.id) : undefined}
           onBlur={() => record.id ? saveEditedCell(record.id) : undefined}
+          allowClear
         />
       </Form.Item>
     ) : (
