@@ -14,6 +14,7 @@ import {
   DashboardOutlined
 } from '@ant-design/icons'
 import { customerApi } from '../../services/api'
+import { updateConstructionAcceptance } from '../../services/api_fix'
 import dayjs from 'dayjs'
 import * as XLSX from 'xlsx'
 
@@ -108,7 +109,7 @@ const GridConnectionDashboard = () => {
         '施工队电话': customer.construction_team_phone || '',
         '逆变器': customer.inverter || '',
         '施工状态': customer.construction_status ? dayjs(customer.construction_status).format('YYYY-MM-DD') : '未完工',
-        '建设验收': customer.construction_acceptance ? dayjs(customer.construction_acceptance).format('YYYY-MM-DD') : '',
+        '建设验收': customer.construction_acceptance_date ? dayjs(customer.construction_acceptance_date).format('YYYY-MM-DD') : '',
         '挂表日期': customer.meter_installation_date ? dayjs(customer.meter_installation_date).format('YYYY-MM-DD') : ''
       }))
 
@@ -129,8 +130,8 @@ const GridConnectionDashboard = () => {
   // 计算统计数据
   const getStatistics = () => {
     const total = customers.length
-    const verifiedCount = customers.filter(c => c.construction_acceptance).length
-    const pendingVerificationCount = customers.filter(c => c.construction_status && !c.construction_acceptance).length
+    const verifiedCount = customers.filter(c => c.construction_acceptance_date).length
+    const pendingVerificationCount = customers.filter(c => c.construction_status && !c.construction_acceptance_date).length
     const meterInstalledCount = customers.filter(c => c.meter_installation_date).length
     const pendingMeterCount = total - meterInstalledCount
     
@@ -246,77 +247,21 @@ const GridConnectionDashboard = () => {
     },
     {
       title: '建设验收',
-      dataIndex: 'construction_acceptance',
-      key: 'construction_acceptance',
+      dataIndex: 'construction_acceptance_date',
+      key: 'construction_acceptance_date',
       width: 120,
       sorter: (a: any, b: any) => {
-        // 处理等待状态的排序
-        const valueA = a.construction_acceptance;
-        const valueB = b.construction_acceptance;
-        
-        // 如果两者都没有值，则相等
-        if (!valueA && !valueB) return 0;
-        
-        // 如果A没有值，则排在B后面
-        if (!valueA) return 1;
-        
-        // 如果B没有值，则A排在B前面
-        if (!valueB) return -1;
-        
-        // 如果A是等待状态
-        if (typeof valueA === 'string' && valueA.startsWith('waiting:')) {
-          // 如果B也是等待状态
-          if (typeof valueB === 'string' && valueB.startsWith('waiting:')) {
-            // 比较两者的开始日期
-            const startDateA = valueA.split(':')[2];
-            const startDateB = valueB.split(':')[2];
-            return dayjs(startDateA).unix() - dayjs(startDateB).unix();
-          }
-          // B不是等待状态，而是时间戳，则等待状态排在前面
-          return -1;
-        }
-        
-        // 如果B是等待状态，A不是
-        if (typeof valueB === 'string' && valueB.startsWith('waiting:')) {
-          return 1;
-        }
-        
-        // 都是时间戳，正常比较
-        return dayjs(valueA).unix() - dayjs(valueB).unix();
+        if (!a.construction_acceptance_date) return 1;
+        if (!b.construction_acceptance_date) return -1;
+        return dayjs(a.construction_acceptance_date).unix() - dayjs(b.construction_acceptance_date).unix();
       },
-      render: (text: any, record: any) => {
-        // 检查是否是等待状态
-        if (text && typeof text === 'string' && text.startsWith('waiting:')) {
-          try {
-            // 解析等待天数和开始日期
-            const [, waitDays, startDate] = text.split(':');
-            const days = parseInt(waitDays, 10);
-            const start = dayjs(startDate);
-            const today = dayjs();
-            const daysPassed = today.diff(start, 'day');
-            const daysLeft = Math.max(0, days - daysPassed);
-            
-            return (
-              <Tooltip title={`开始日期: ${startDate}, 等待天数: ${waitDays}`}>
-                <Tag color="processing" style={{ cursor: 'pointer' }} onClick={() => handleConstructionAcceptanceChange(record.id, text)}>
-                  <ClockCircleOutlined /> 等待中 ({daysLeft}天)
-                </Tag>
-              </Tooltip>
-            );
-          } catch (e) {
-            console.error('解析等待状态失败:', e);
-            return <Tag color="orange"><ClockCircleOutlined /> 未验收</Tag>;
-          }
-        } else {
-          return text ? 
-            <Tag color="green" style={{ cursor: 'pointer' }} onClick={() => handleConstructionAcceptanceChange(record.id, text)}>
-              <CheckCircleOutlined /> {dayjs(text).format('YYYY-MM-DD')}
-            </Tag> : 
-            <Tag color="orange" style={{ cursor: 'pointer' }} onClick={() => showConstructionAcceptanceOptions(record.id)}>
-              <ClockCircleOutlined /> 未验收
-            </Tag>;
-        }
-      },
+      render: (text: any, record: any) => text ? 
+        <Tag color="green" style={{ cursor: 'pointer' }} onClick={() => handleConstructionAcceptanceChange(record.id, text)}>
+          <CheckCircleOutlined /> {dayjs(text).format('YYYY-MM-DD')}
+        </Tag> : 
+        <Tag color="orange" style={{ cursor: 'pointer' }} onClick={() => handleConstructionAcceptanceChange(record.id, null)}>
+          <ClockCircleOutlined /> 未推到
+        </Tag>,
     },
     {
       title: '挂表日期',
@@ -339,7 +284,7 @@ const GridConnectionDashboard = () => {
   ]
 
   // 处理建设验收状态变更
-  const handleConstructionAcceptanceChange = async (id: string | undefined, currentStatus: string | null, days?: number) => {
+  const handleConstructionAcceptanceChange = async (id: string | undefined, currentStatus: string | null) => {
     if (!id) {
       console.error('无效的客户ID');
       message.error('操作失败: 无效的客户ID');
@@ -348,101 +293,27 @@ const GridConnectionDashboard = () => {
     
     try {
       setLoading(true);
+      console.log(`[建设验收] 更新客户(${id})的建设验收状态，当前状态:`, currentStatus ? '已完成' : '未推到');
       
-      let updateObj: Record<string, any> = {};
+      // 使用安全的API方法，只传递必要的字段
+      const isAccepted = !currentStatus; // 当前没有日期，需要设为已接受
+      await updateConstructionAcceptance(id, isAccepted);
       
-      if (!currentStatus) {
-        if (days !== undefined) {
-          // 设置等待状态
-          // 将等待天数和开始日期保存在状态值中，格式为: "waiting:天数:开始日期"
-          const startDate = dayjs().format('YYYY-MM-DD');
-          updateObj.construction_acceptance = `waiting:${days}:${startDate}`;
-        } else {
-          // 直接设置为已验收状态
-          updateObj.construction_acceptance = new Date().toISOString();
-        }
-      } else {
-        // 恢复为未验收状态
-        updateObj.construction_acceptance = null;
-      }
+      message.success(currentStatus ? '已重置为未推到状态' : '已标记为推到完成');
       
-      await customerApi.update(id, updateObj);
-      
-      if (currentStatus) {
-        message.success('已恢复为未验收状态');
-      } else if (days !== undefined) {
-        message.success(`已设置为等待天数: ${days}`);
-      } else {
-        message.success('已标记为已验收状态');
-      }
-      
-      fetchCustomers(); // 刷新数据
+      // 刷新数据
+      fetchCustomers();
     } catch (error) {
-      console.error('更新建设验收状态失败:', error);
-      message.error('操作失败，请重试');
+      console.error('[建设验收] 操作过程出错:', error);
+      
+      if (error instanceof Error) {
+        message.error(`更新失败: ${error.message}`);
+      } else {
+        message.error('操作失败，请重试');
+      }
     } finally {
       setLoading(false);
     }
-  };
-
-  // 显示建设验收选项对话框
-  const showConstructionAcceptanceOptions = (id: string | undefined) => {
-    if (!id) {
-      console.error('无效的客户ID');
-      message.error('操作失败: 无效的客户ID');
-      return;
-    }
-
-    let radioValue = 'now';
-    let waitDays = 7;
-    
-    Modal.confirm({
-      title: '设置建设验收状态',
-      width: 400,
-      icon: null,
-      content: (
-        <div>
-          <Radio.Group 
-            defaultValue="now" 
-            onChange={(e) => {
-              radioValue = e.target.value;
-              // 通过DOM更新输入框的显示/隐藏状态
-              const element = document.getElementById('waitDaysInputContainer');
-              if (element) {
-                element.style.display = radioValue === 'wait' ? 'block' : 'none';
-              }
-            }}
-          >
-            <Space direction="vertical">
-              <Radio value="now">立即标记为已验收</Radio>
-              <Radio value="wait">等待天数</Radio>
-            </Space>
-          </Radio.Group>
-          <div id="waitDaysInputContainer" style={{ marginLeft: 24, marginTop: 10, display: 'none' }}>
-            <InputNumber 
-              min={1} 
-              max={999} 
-              defaultValue={7}
-              onChange={(value: number | null) => { 
-                waitDays = value ?? 7;
-              }}
-            /> 天
-          </div>
-        </div>
-      ),
-      async onOk() {
-        try {
-          if (radioValue === 'wait') {
-            await handleConstructionAcceptanceChange(id, null, waitDays);
-          } else {
-            await handleConstructionAcceptanceChange(id, null);
-          }
-          return Promise.resolve();
-        } catch (error) {
-          return Promise.reject();
-        }
-      }
-    });
   };
 
   // 处理挂表日期状态变更
@@ -622,7 +493,7 @@ const GridConnectionDashboard = () => {
             className="custom-table customer-table"
           rowClassName={(record) => {
             if (record.meter_installation_date) return 'meter-row';
-            if (record.construction_acceptance) return 'verified-row';
+            if (record.construction_acceptance_date) return 'verified-row';
             if (record.construction_status) return 'pending-row';
             return 'table-row';
           }}

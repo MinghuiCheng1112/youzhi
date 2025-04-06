@@ -1,0 +1,69 @@
+// 执行SQL脚本的工具，不使用事务包装
+require('dotenv').config();
+const fs = require('fs');
+const { Pool } = require('pg');
+
+// 从环境变量中获取数据库连接信息
+const pool = new Pool({
+  host: process.env.SUPABASE_HOST,
+  port: process.env.SUPABASE_PORT,
+  database: process.env.SUPABASE_DB,
+  user: process.env.SUPABASE_USER,
+  password: process.env.SUPABASE_PASSWORD,
+  ssl: { rejectUnauthorized: false }
+});
+
+// 建立连接并执行SQL
+async function execSQL() {
+  let client;
+
+  try {
+    console.log('正在连接Supabase数据库...');
+    console.log(`使用连接信息: ${process.env.SUPABASE_HOST}:${process.env.SUPABASE_PORT} - ${process.env.SUPABASE_DB}`);
+    
+    // 获取脚本文件路径
+    const scriptPath = process.argv[2];
+    if (!scriptPath) {
+      throw new Error('未提供SQL脚本文件路径。使用方法: node exec_sql_no_transaction.js 脚本路径.sql');
+    }
+    
+    console.log(`读取SQL文件: ${process.cwd()}\\${scriptPath}`);
+    
+    // 读取SQL脚本内容
+    const sqlContent = fs.readFileSync(scriptPath, { encoding: 'utf8' });
+    
+    // 建立连接
+    client = await pool.connect();
+    
+    // 分割SQL命令并逐个执行
+    const sqlCommands = sqlContent.split(';').filter(cmd => cmd.trim());
+    
+    for (const command of sqlCommands) {
+      if (command.trim()) {
+        try {
+          console.log(`执行SQL命令: ${command.trim()}`);
+          const result = await client.query(command.trim());
+          console.log('命令执行成功!');
+          
+          if (result.rows && result.rows.length > 0) {
+            console.log('结果:');
+            console.table(result.rows);
+          }
+        } catch (cmdError) {
+          console.error(`执行命令失败: ${cmdError.message}`);
+        }
+      }
+    }
+    
+  } catch (err) {
+    console.error('执行SQL时出错:', err);
+  } finally {
+    if (client) {
+      client.release();
+    }
+    console.log('数据库连接已关闭');
+    pool.end();
+  }
+}
+
+execSQL(); 

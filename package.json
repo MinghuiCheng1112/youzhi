@@ -13,7 +13,8 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "test": "vitest",
-    "auto-dispatch": "node --experimental-modules scripts/auto_dispatch_date.js"
+    "auto-dispatch": "node --experimental-modules scripts/auto_dispatch_date.js",
+    "cleanup-db": "node scripts/run_cleanup.js"
   },
   "dependencies": {
     "@ant-design/charts": "^2.2.1",

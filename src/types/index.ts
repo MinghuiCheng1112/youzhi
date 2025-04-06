@@ -5,7 +5,7 @@ export type OutboundStatus = 'none' | 'outbound' | 'inbound' | 'returned';
 export type TechnicalReviewStatus = 'pending' | 'approved' | 'rejected';
 
 // 建设验收状态类型定义
-export type ConstructionAcceptanceStatus = 'pending' | 'waiting' | 'completed';
+export type ConstructionAcceptanceStatus = 'pending' | 'completed';
 
 // 客户信息类型定义
 export interface Customer {

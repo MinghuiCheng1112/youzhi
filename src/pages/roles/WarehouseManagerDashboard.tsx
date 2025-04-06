@@ -819,64 +819,59 @@ const WarehouseManagerDashboard = () => {
       align: 'center' as const,
       render: (_: unknown, record: Customer) => {
         // 使用status来判断状态
-        const status = record.square_steel_status || 'none';
+        // 修改为使用日期字段判断出库状态
+        // 1. 如果方钢出库日期和回库日期都有数据，显示回库状态
+        // 2. 如果只有出库日期有数据，显示出库状态  
+        // 3. 如果出库日期和回库日期都为空，显示按钮状态
         
-        if (record.square_steel_outbound_date) {
-          if (record.square_steel_outbound_date === 'RETURNED') {
-            return (
-              <Tag color="red">
-                <CloseCircleOutlined /> 退单
+        if (record.square_steel_outbound_date && record.square_steel_inbound_date) {
+          // 回库状态 - 可点击变为出库状态
+          const inboundDate = dayjs(record.square_steel_inbound_date).format('YYYY-MM-DD');
+          
+          return (
+            <Tooltip title="点击变更状态">
+              <Tag 
+                color="orange"
+                style={{ cursor: 'pointer' }}
+                onClick={() => {
+                  confirm({
+                    title: '变更方钢状态',
+                    content: '请选择要变更的状态',
+                    okText: '变为出库',
+                    cancelText: '变为未出库',
+                    onOk: () => handleOutboundStatusChange(record.id, 'square_steel', 'outbound'),
+                    onCancel: () => handleOutboundStatusChange(record.id, 'square_steel', 'none')
+                  });
+                }}
+              >
+                <RollbackOutlined /> 回库 {inboundDate}
               </Tag>
-            );
-          } else if (status === 'inbound') {
-            // 回库状态 - 可点击变为出库状态
-            const inboundDate = record.square_steel_inbound_date 
-              ? dayjs(record.square_steel_inbound_date).format('YYYY-MM-DD')
-              : dayjs().format('YYYY-MM-DD');
-            
-            return (
-              <Tooltip title="点击变更状态">
-                <Tag 
-                  color="orange"
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => {
-                    confirm({
-                      title: '变更方钢状态',
-                      content: '请选择要变更的状态',
-                      okText: '变为出库',
-                      cancelText: '变为未出库',
-                      onOk: () => handleOutboundStatusChange(record.id, 'square_steel', 'outbound'),
-                      onCancel: () => handleOutboundStatusChange(record.id, 'square_steel', 'none')
-                    });
-                  }}
-                >
-                  <RollbackOutlined /> 回库 {inboundDate}
-                </Tag>
-              </Tooltip>
-            );
-          } else {
-            // 已出库状态 - 可点击变为回库状态
-            return (
-              <Tooltip title="点击变更状态">
-                <Tag 
-                  color="green"
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => {
-                    confirm({
-                      title: '变更方钢状态',
-                      content: '请选择要变更的状态',
-                      okText: '变为回库',
-                      cancelText: '变为未出库',
-                      onOk: () => handleOutboundStatusChange(record.id, 'square_steel', 'inbound'),
-                      onCancel: () => handleOutboundStatusChange(record.id, 'square_steel', 'none')
-                    });
-                  }}
-                >
-                  {dayjs(record.square_steel_outbound_date).format('YYYY-MM-DD')}
-                </Tag>
-              </Tooltip>
-            );
-          }
+            </Tooltip>
+          );
+        } else if (record.square_steel_outbound_date) {
+          // 已出库状态 - 可点击变为回库状态
+          const outboundDate = dayjs(record.square_steel_outbound_date).format('YYYY-MM-DD');
+          
+          return (
+            <Tooltip title="点击变更状态">
+              <Tag 
+                color="green"
+                style={{ cursor: 'pointer' }}
+                onClick={() => {
+                  confirm({
+                    title: '变更方钢状态',
+                    content: '请选择要变更的状态',
+                    okText: '变为回库',
+                    cancelText: '变为未出库',
+                    onOk: () => handleOutboundStatusChange(record.id, 'square_steel', 'inbound'),
+                    onCancel: () => handleOutboundStatusChange(record.id, 'square_steel', 'none')
+                  });
+                }}
+              >
+                {outboundDate}
+              </Tag>
+            </Tooltip>
+          );
         } else {
           // 未出库状态 - 显示出库按钮
           return (
@@ -903,65 +898,59 @@ const WarehouseManagerDashboard = () => {
       key: 'component_outbound_date',
       width: 150,
       render: (date: string | null, record: Customer) => {
-        // 使用status来判断状态
-        const status = record.component_status || 'none';
+        // 修改为使用日期字段判断出库状态
+        // 1. 如果组件出库日期和回库日期都有数据，显示回库状态
+        // 2. 如果只有出库日期有数据，显示出库状态  
+        // 3. 如果出库日期和回库日期都为空，显示按钮状态
         
-        if (date) {
-          if (date === 'RETURNED') {
-            return (
-              <Tag color="red">
-                <CloseCircleOutlined /> 退单
+        if (record.component_outbound_date && record.component_inbound_date) {
+          // 回库状态 - 可点击变为出库状态
+          const inboundDate = dayjs(record.component_inbound_date).format('YYYY-MM-DD');
+          
+          return (
+            <Tooltip title="点击变更状态">
+              <Tag 
+                color="orange"
+                style={{ cursor: 'pointer' }}
+                onClick={() => {
+                  confirm({
+                    title: '变更组件状态',
+                    content: '请选择要变更的状态',
+                    okText: '变为出库',
+                    cancelText: '变为未出库',
+                    onOk: () => handleOutboundStatusChange(record.id, 'component', 'outbound'),
+                    onCancel: () => handleOutboundStatusChange(record.id, 'component', 'none')
+                  });
+                }}
+              >
+                <RollbackOutlined /> 回库 {inboundDate}
               </Tag>
-            );
-          } else if (status === 'inbound') {
-            // 回库状态 - 可点击变为出库状态
-            const inboundDate = record.component_inbound_date 
-              ? dayjs(record.component_inbound_date).format('YYYY-MM-DD')
-              : dayjs().format('YYYY-MM-DD');
-            
-            return (
-              <Tooltip title="点击变更状态">
-                <Tag 
-                  color="orange"
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => {
-                    confirm({
-                      title: '变更组件状态',
-                      content: '请选择要变更的状态',
-                      okText: '变为出库',
-                      cancelText: '变为未出库',
-                      onOk: () => handleOutboundStatusChange(record.id, 'component', 'outbound'),
-                      onCancel: () => handleOutboundStatusChange(record.id, 'component', 'none')
-                    });
-                  }}
-                >
-                  <RollbackOutlined /> 回库 {inboundDate}
-                </Tag>
-              </Tooltip>
-            );
-          } else {
-            // 已出库状态 - 可点击变为回库状态
-            return (
-              <Tooltip title="点击变更状态">
-                <Tag 
-                  color="green"
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => {
-                    confirm({
-                      title: '变更组件状态',
-                      content: '请选择要变更的状态',
-                      okText: '变为回库',
-                      cancelText: '变为未出库',
-                      onOk: () => handleOutboundStatusChange(record.id, 'component', 'inbound'),
-                      onCancel: () => handleOutboundStatusChange(record.id, 'component', 'none')
-                    });
-                  }}
-                >
-                  {dayjs(date).format('YYYY-MM-DD')}
-                </Tag>
-              </Tooltip>
-            );
-          }
+            </Tooltip>
+          );
+        } else if (record.component_outbound_date) {
+          // 已出库状态 - 可点击变为回库状态
+          const outboundDate = dayjs(record.component_outbound_date).format('YYYY-MM-DD');
+          
+          return (
+            <Tooltip title="点击变更状态">
+              <Tag 
+                color="green"
+                style={{ cursor: 'pointer' }}
+                onClick={() => {
+                  confirm({
+                    title: '变更组件状态',
+                    content: '请选择要变更的状态',
+                    okText: '变为回库',
+                    cancelText: '变为未出库',
+                    onOk: () => handleOutboundStatusChange(record.id, 'component', 'inbound'),
+                    onCancel: () => handleOutboundStatusChange(record.id, 'component', 'none')
+                  });
+                }}
+              >
+                {outboundDate}
+              </Tag>
+            </Tooltip>
+          );
         } else {
           // 未出库状态 - 显示出库按钮
           return (
