@@ -849,10 +849,15 @@ const CustomerForm = () => {
                   // 如果选择了施工队，自动填充电话
                   if (value && option && option.phone) {
                     form.setFieldsValue({ construction_team_phone: option.phone });
+                    // 如果施工队有值，设置派工日期为当前日期
+                    form.setFieldsValue({ dispatch_date: dayjs() });
                   } else if (!value) {
-                    // 如果清空了施工队，也清空电话（设置为null而不是空字符串）
-                    form.setFieldsValue({ construction_team_phone: null });
-                    console.log('清空施工队，将电话设置为null');
+                    // 如果清空了施工队，也清空电话和派工日期
+                    form.setFieldsValue({ 
+                      construction_team_phone: null,
+                      dispatch_date: null
+                    });
+                    console.log('清空施工队，将电话和派工日期设置为null');
                   }
                 }}
               >

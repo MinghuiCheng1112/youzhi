@@ -224,7 +224,7 @@ const DispatchManagerDashboard = () => {
     setCurrentCustomer(customer)
     form.setFieldsValue({
       construction_team: customer.construction_team || undefined,
-      dispatch_date: customer.dispatch_date ? dayjs(customer.dispatch_date) : dayjs(),
+      dispatch_date: customer.construction_team && customer.dispatch_date ? dayjs(customer.dispatch_date) : undefined,
       dispatch_notes: ''
     })
     setDispatchModalVisible(true)
@@ -237,9 +237,12 @@ const DispatchManagerDashboard = () => {
       
       if (!currentCustomer) return
       
-      // 转换日期格式
-      if (values.dispatch_date) {
-        values.dispatch_date = values.dispatch_date.format('YYYY-MM-DD')
+      // 如果施工队为空，确保派工日期也为空
+      if (!values.construction_team) {
+        values.dispatch_date = null;
+      } else {
+        // 如果施工队有数据，则设置派工日期为当前时间
+        values.dispatch_date = values.dispatch_date ? values.dispatch_date.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
       }
       
       // 如果是派工，同时清除催单标记
@@ -249,6 +252,8 @@ const DispatchManagerDashboard = () => {
       
       // 移除不存在的字段
       delete values.dispatch_notes;
+      
+      console.log('派工更新数据:', values);
       
       // 确保 id 存在后再调用 update
       if (currentCustomer?.id) {

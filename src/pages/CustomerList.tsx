@@ -2402,7 +2402,29 @@ const CustomerList = () => {
       ellipsis: true,
       render: (value, record) => {
         console.log('渲染施工队字段:', record.id, value);
-        return <ConstructionTeamCell value={value} record={record} />;
+        return <ConstructionTeamCell 
+          value={value} 
+          record={record}
+          onChange={(newValue) => {
+            // 当施工队字段变更时，同步处理派工日期
+            if (!newValue || newValue.trim() === '') {
+              // 如果施工队清空，也清空派工日期
+              customerApi.update(record.id, { 
+                construction_team: newValue,
+                dispatch_date: null 
+              });
+            } else if (!record.construction_team && newValue) {
+              // 如果施工队从无到有，设置派工日期为当前日期
+              customerApi.update(record.id, { 
+                construction_team: newValue,
+                dispatch_date: new Date().toISOString().split('T')[0]
+              });
+            } else {
+              // 仅更新施工队
+              customerApi.update(record.id, { construction_team: newValue });
+            }
+          }}
+        />;
       }
     },
     {
@@ -2959,7 +2981,15 @@ const CustomerList = () => {
   };
 
   // 创建施工队可编辑单元格
-  const ConstructionTeamCell = ({ value, record }: { value: any; record: Customer }) => {
+  const ConstructionTeamCell = ({ 
+    value, 
+    record, 
+    onChange 
+  }: { 
+    value: any; 
+    record: Customer; 
+    onChange?: (newValue: any) => void 
+  }) => {
     const editable = isEditing(record, 'construction_team');
     const [hover, setHover] = useState(false);
     
@@ -2985,7 +3015,16 @@ const CustomerList = () => {
           showSearch
           optionFilterProp="label"
           options={constructionTeamOptions}
-          onBlur={() => record.id ? saveEditedCell(record.id) : undefined}
+          onBlur={() => {
+            if (record.id) {
+              saveEditedCell(record.id);
+              // 保存后通知父组件值已更改
+              const newValue = editForm.getFieldValue('construction_team');
+              if (onChange && newValue !== value) {
+                onChange(newValue);
+              }
+            }
+          }}
           onChange={(value, option) => {
             console.log('选择施工队:', value, option);
             // 如果选择了施工队，自动填充电话
