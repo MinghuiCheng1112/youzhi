@@ -53,7 +53,16 @@ const CustomerList = () => {
   const [pageSize, setPageSize] = useState<number>(100)
   const [currentPage, setCurrentPage] = useState<number>(1)
   const [totalPages, setTotalPages] = useState<number>(1)
-  
+  // 添加虚拟滚动相关状态
+  const [virtualPage, setVirtualPage] = useState<number>(1)
+  const [virtualLoading, setVirtualLoading] = useState<boolean>(false)
+  const [loadedRecords, setLoadedRecords] = useState<Set<string>>(new Set())
+
+  // 限制每次最大加载记录数以提高性能
+  const MAX_RECORDS_PER_LOAD = 500; // 恢复合理的数据量限制
+  // 虚拟滚动时每页加载的记录数
+  const VIRTUAL_PAGE_SIZE = 200; // 适当大小的分页数量
+
   const STATION_MANAGEMENT_OPTIONS = [
     { value: '房产证', label: '房产证', color: 'blue' },
     { value: '授权书', label: '授权书', color: 'purple' },
@@ -141,124 +150,166 @@ const CustomerList = () => {
 
   // 获取所有客户数据
   const fetchCustomers = async () => {
-      setLoading(true)
+    setLoading(true)
     try {
+      console.log('开始获取所有客户数据...');
       // 获取所有客户
       const data = await customerApi.getAll()
+      console.log(`成功获取到 ${data.length} 条客户数据`);
       
-      // 应用计算字段
-      const processedData = data.map(customer => {
-        // 处理计算字段
-        let processedCustomer = { ...customer };
-        if (customer.module_count && customer.module_count > 0) {
-          const calculatedFields = calculateAllFields(customer.module_count);
-          processedCustomer = {
-            ...processedCustomer,
-            ...calculatedFields
-          };
-        }
+      // 分批处理数据以避免UI卡顿
+      const processData = (startIndex = 0, batchSize = MAX_RECORDS_PER_LOAD) => {
+        const endIndex = Math.min(startIndex + batchSize, data.length);
+        const batch = data.slice(startIndex, endIndex);
         
-        return processedCustomer;
-      });
-      
-      setCustomers(processedData)
-      setFilteredCustomers(processedData)
-      setTotalPages(Math.ceil(processedData.length / pageSize)) // 更新总页数
-      setCurrentPage(1) // 重置到第一页
-      
-      // 先从已有客户中提取业务员信息
-      const salesmen = new Map<string, string>()
-      processedData.forEach(customer => {
-        if (customer.salesman && customer.salesman.trim() !== '') {
-          salesmen.set(customer.salesman, customer.salesman_phone || '')
-        }
-      })
-      
-      // 再从user_roles表获取所有业务员信息
-      try {
-        const { data: salesmenData, error } = await supabase
-          .from('user_roles')
-          .select('name, phone, email, user_id')
-          .eq('role', 'salesman');
+        // 处理当前批次
+        const processedBatch = batch.map(customer => {
+          let processedCustomer = { ...customer };
+          if (customer.module_count && customer.module_count > 0) {
+            const calculatedFields = calculateAllFields(customer.module_count);
+            processedCustomer = {
+              ...processedCustomer,
+              ...calculatedFields
+            };
+          }
+          return processedCustomer;
+        });
         
-        if (error) throw error;
+        // 更新状态，保留之前处理的数据
+        setCustomers(prev => [...prev, ...processedBatch]);
+        setFilteredCustomers(prev => [...prev, ...processedBatch]);
         
-        // 将从user_roles表获取的业务员信息合并到映射中
-        if (salesmenData) {
-          // 根据业务员表进行一次初始检查，将邮箱格式的业务员字段转换为姓名
-          const salesmenEmailMap = new Map<string, {name: string, phone: string}>();
+        // 检查是否还有更多数据需要处理
+        if (endIndex < data.length) {
+          // 使用setTimeout避免阻塞UI
+          setTimeout(() => {
+            processData(endIndex, batchSize);
+          }, 0);
+        } else {
+          // 所有数据处理完成
+          console.log('所有客户数据处理完成');
+          setTotalPages(Math.ceil(data.length / pageSize)); // 更新总页数
+          setLoading(false);
           
-          salesmenData.forEach(salesman => {
-            if (salesman.name && salesman.name.trim() !== '') {
-              // 只有当salesmen中不存在此业务员或电话为空时才更新
-              if (!salesmen.has(salesman.name) || !salesmen.get(salesman.name)) {
-                salesmen.set(salesman.name, salesman.phone || '');
-              }
-              
-              // 如果有邮箱，记录邮箱到姓名的映射
-              if (salesman.email) {
-                salesmenEmailMap.set(salesman.email, {
-                  name: salesman.name,
-                  phone: salesman.phone || ''
-                });
-              }
-              
-              // 如果有用户ID，也尝试获取关联邮箱
-              if (salesman.user_id) {
-                // 这里需要异步，但为了简单，我们会在后面单独更新包含邮箱的客户
-                console.log('记录业务员ID关联:', salesman.user_id, salesman.name);
-              }
+          // 先从已有客户中提取业务员信息
+          const salesmen = new Map<string, string>()
+          data.forEach(customer => {
+            if (customer.salesman && customer.salesman.trim() !== '') {
+              salesmen.set(customer.salesman, customer.salesman_phone || '')
             }
-          });
+          })
           
-          // 检查客户列表，更新所有使用邮箱作为业务员的记录
-          let needUpdateCustomers = false;
-          const updatedCustomers = processedData.map(customer => {
-            if (customer.salesman && typeof customer.salesman === 'string' && customer.salesman.includes('@')) {
-              const matchedSalesman = salesmenEmailMap.get(customer.salesman);
-              if (matchedSalesman) {
-                needUpdateCustomers = true;
-                console.log(`发现业务员邮箱 ${customer.salesman}，自动转换为 ${matchedSalesman.name}`);
+          // 再从user_roles表获取所有业务员信息
+          try {
+            // 改用Promise链式调用而不是await
+            supabase
+              .from('user_roles')
+              .select('name, phone, email, user_id')
+              .eq('role', 'salesman')
+              .then(({ data: salesmenData, error }) => {
+                if (error) throw error;
                 
-                // 立即更新业务员信息
-                setTimeout(() => {
-                  handleUpdateSalesmanName(customer.id as string, customer.salesman as string, matchedSalesman.name, matchedSalesman.phone || '');
-                }, 0);
+                // 将从user_roles表获取的业务员信息合并到映射中
+                if (salesmenData) {
+                  // 根据业务员表进行一次初始检查，将邮箱格式的业务员字段转换为姓名
+                  const salesmenEmailMap = new Map<string, {name: string, phone: string}>();
+                  
+                  salesmenData.forEach(salesman => {
+                    if (salesman.name && salesman.name.trim() !== '') {
+                      // 只有当salesmen中不存在此业务员或电话为空时才更新
+                      if (!salesmen.has(salesman.name) || !salesmen.get(salesman.name)) {
+                        salesmen.set(salesman.name, salesman.phone || '');
+                      }
+                      
+                      // 如果有邮箱，记录邮箱到姓名的映射
+                      if (salesman.email) {
+                        salesmenEmailMap.set(salesman.email, {
+                          name: salesman.name,
+                          phone: salesman.phone || ''
+                        });
+                      }
+                      
+                      // 如果有用户ID，也尝试获取关联邮箱
+                      if (salesman.user_id) {
+                        // 这里需要异步，但为了简单，我们会在后面单独更新包含邮箱的客户
+                        console.log('记录业务员ID关联:', salesman.user_id, salesman.name);
+                      }
+                    }
+                  });
+                  
+                  // 检查客户列表，更新所有使用邮箱作为业务员的记录
+                  let needUpdateCustomers = false;
+                  const updatedCustomers = data.map(customer => {
+                    if (customer.salesman && typeof customer.salesman === 'string' && customer.salesman.includes('@')) {
+                      const matchedSalesman = salesmenEmailMap.get(customer.salesman);
+                      if (matchedSalesman) {
+                        needUpdateCustomers = true;
+                        console.log(`发现业务员邮箱 ${customer.salesman}，自动转换为 ${matchedSalesman.name}`);
+                        
+                        // 立即更新业务员信息
+                        setTimeout(() => {
+                          handleUpdateSalesmanName(customer.id as string, customer.salesman as string, matchedSalesman.name, matchedSalesman.phone || '');
+                        }, 0);
+                        
+                        // 返回更新后的客户对象
+                        return {
+                          ...customer,
+                          salesman: matchedSalesman.name,
+                          salesman_phone: matchedSalesman.phone || customer.salesman_phone
+                        };
+                      }
+                    }
+                    return customer;
+                  });
+                  
+                  // 如果有更新，刷新客户列表
+                  if (needUpdateCustomers) {
+                    setCustomers(updatedCustomers);
+                    setFilteredCustomers(updatedCustomers);
+                  }
+                }
                 
-                // 返回更新后的客户对象
-                return {
-                  ...customer,
-                  salesman: matchedSalesman.name,
-                  salesman_phone: matchedSalesman.phone || customer.salesman_phone
-                };
-              }
-            }
-            return customer;
-          });
-          
-          // 如果有更新，刷新客户列表
-          if (needUpdateCustomers) {
-            setCustomers(updatedCustomers);
-            setFilteredCustomers(updatedCustomers);
+                // 构建业务员数组并更新状态
+                const salesmenArray = Array.from(salesmen).map(([name, phone]) => ({
+                  name,
+                  phone
+                }));
+                setSalesmenList(salesmenArray);
+              })
+              .catch(error => {
+                console.error('获取业务员信息失败:', error);
+                
+                // 发生错误时仍然使用客户数据中提取的业务员信息
+                const salesmenArray = Array.from(salesmen).map(([name, phone]) => ({
+                  name,
+                  phone
+                }));
+                setSalesmenList(salesmenArray);
+              });
+          } catch (error) {
+            console.error('获取业务员信息失败:', error);
+            
+            // 构建业务员数组并更新状态
+            const salesmenArray = Array.from(salesmen).map(([name, phone]) => ({
+              name,
+              phone
+            }));
+            setSalesmenList(salesmenArray);
           }
         }
-      } catch (error) {
-        console.error('获取业务员信息失败:', error);
-      }
+      };
       
-      const salesmenArray = Array.from(salesmen).map(([name, phone]) => ({
-        name,
-        phone
-      }))
+      // 重置状态并开始处理第一批数据
+      setCustomers([]);
+      setFilteredCustomers([]);
+      processData(0, MAX_RECORDS_PER_LOAD);
       
-      setSalesmenList(salesmenArray)
     } catch (error) {
       message.error('获取客户数据失败')
       console.error(error)
-    } finally {
       setLoading(false)
     }
-  }
+  };
 
   // 获取施工队列表
   const fetchConstructionTeams = async () => {
@@ -351,6 +402,9 @@ const CustomerList = () => {
     if (!value.trim()) {
       setFilteredCustomers(customers);
       setTotalPages(Math.ceil(customers.length / pageSize));
+      // 重置虚拟滚动状态
+      setVirtualPage(1);
+      setLoadedRecords(new Set());
       return;
     }
 
@@ -359,7 +413,7 @@ const CustomerList = () => {
       .split(/[\s,，]+/) // 按空格或中英文逗号分隔
       .filter(keyword => keyword.trim() !== ''); // 过滤掉空字符串
     
-    // 使用高效的单次遍历过滤
+    // 直接过滤所有数据，不再分批处理
     const filtered = customers.filter(customer => {
       // 只检查最重要的几个字段，减少遍历次数
       const name = (customer.customer_name || '').toLowerCase();
@@ -382,11 +436,9 @@ const CustomerList = () => {
     
     setFilteredCustomers(filtered);
     setTotalPages(Math.ceil(filtered.length / pageSize));
-    
-    // 只在真正需要时显示消息，且仅在用户显式触发搜索时（通过handleSearch函数）
-    if (filtered.length === 0 && customers.length > 0 && value.length > 0) {
-      // 消息显示逻辑移至handleSearch函数
-    }
+    // 重置虚拟滚动状态
+    setVirtualPage(1);
+    setLoadedRecords(new Set());
   };
   
   // 使用立即处理的方式代替防抖，避免延迟
@@ -909,17 +961,21 @@ const CustomerList = () => {
       cancelText: '取消',
       onOk: async () => {
         try {
-          // 使用数据缓存服务删除客户（前端立即删除，后台静默处理）
-          customerApi.deleteWithCache(id);
+          // 使用数据缓存服务删除客户
+          const success = await customerApi.deleteWithCache(id);
           
-          // 更新本地状态
-          setCustomers(prev => prev.filter(customer => customer.id !== id));
-          setFilteredCustomers(prev => prev.filter(customer => customer.id !== id));
-          
-          message.success('客户删除成功');
+          if (success) {
+            // 更新本地状态
+            setCustomers(prev => prev.filter(customer => customer.id !== id));
+            setFilteredCustomers(prev => prev.filter(customer => customer.id !== id));
+            
+            message.success('客户删除成功');
+          } else {
+            message.error('删除客户失败，请刷新页面后重试');
+          }
         } catch (error) {
-          message.error('删除客户失败');
-          console.error(error);
+          message.error('删除客户失败，系统出现异常');
+          console.error('删除客户时发生错误:', error);
         }
       }
     });
@@ -3340,15 +3396,37 @@ const CustomerList = () => {
       
       console.log(`[购售电合同] 更新客户(${id})的购售电合同状态，采用缓存+异步模式`);
       
+      // 获取客户当前数据，确保不会影响其他字段
+      const currentCustomer = customers.find(c => c.id === id);
+      if (!currentCustomer) {
+        throw new Error('找不到客户信息');
+      }
+      
       // 使用数据缓存服务更新数据，UI立即响应
       const updatedCustomer = customerApi.updateWithCache(id, updateObj);
       
-      // 更新本地状态
+      // 更新本地状态 - 只更新power_purchase_contract字段，保留其他字段不变
       setCustomers(prev => 
-        prev.map(c => (c.id === id ? { ...c, ...updatedCustomer } : c))
+        prev.map(c => {
+          if (c.id === id) {
+            return { 
+              ...c, 
+              power_purchase_contract: updateObj.power_purchase_contract
+            };
+          }
+          return c;
+        })
       );
       setFilteredCustomers(prev => 
-        prev.map(c => (c.id === id ? { ...c, ...updatedCustomer } : c))
+        prev.map(c => {
+          if (c.id === id) {
+            return { 
+              ...c, 
+              power_purchase_contract: updateObj.power_purchase_contract
+            };
+          }
+          return c;
+        })
       );
       
       message.success(currentStatus ? '已恢复为待出状态' : '已标记为已出合同');
@@ -3694,14 +3772,81 @@ const CustomerList = () => {
     setPageSize(size);
     setCurrentPage(1); // 重置到第一页
     setTotalPages(Math.ceil(filteredCustomers.length / size));
+    // 重置虚拟滚动状态
+    setVirtualPage(1);
+    setLoadedRecords(new Set());
   }
   
-  // 计算当前页显示的数据
+  // 修改getVirtualCustomers函数，支持虚拟渲染
+  const getVirtualCustomers = () => {
+    // 基础分页逻辑 - 确定当前页的范围
+    const pageStartIndex = (currentPage - 1) * pageSize;
+    const pageEndIndex = Math.min(pageStartIndex + pageSize, filteredCustomers.length);
+    
+    // 当页面大小大于等于500时，使用虚拟滚动
+    if (pageSize >= 500) {
+      // 获取表格可视区域的预估高度 - 65px是一个预估的行高
+      const tableBodyHeight = window.innerHeight - 200; // 估计表头等其他元素高度
+      const visibleRowsCount = Math.ceil(tableBodyHeight / 65); // 可见行数
+      
+      // 计算当前滚动位置
+      const scrollPosition = document.querySelector('.ant-table-body')?.scrollTop || 0;
+      const startRowIndex = Math.floor(scrollPosition / 65);
+      
+      // 计算虚拟窗口范围
+      const bufferSize = Math.ceil(visibleRowsCount / 2); // 上下缓冲区域
+      const virtualStartIndex = Math.max(pageStartIndex, pageStartIndex + Math.max(0, startRowIndex - bufferSize));
+      const virtualEndIndex = Math.min(pageEndIndex, virtualStartIndex + visibleRowsCount + 2 * bufferSize);
+      
+      // 返回虚拟窗口的数据
+      const visibleData = filteredCustomers.slice(virtualStartIndex, virtualEndIndex);
+      
+      // 添加占位元素确保滚动条高度正确
+      if (virtualStartIndex > pageStartIndex) {
+        // 在数组开头添加一个特殊的占位元素，带有正确的高度样式
+        visibleData.unshift({
+          id: 'top-spacer',
+          _isPlaceholder: true,
+          _height: (virtualStartIndex - pageStartIndex) * 65,
+        } as any);
+      }
+      
+      if (virtualEndIndex < pageEndIndex) {
+        // 在数组末尾添加一个特殊的占位元素
+        visibleData.push({
+          id: 'bottom-spacer',
+          _isPlaceholder: true,
+          _height: (pageEndIndex - virtualEndIndex) * 65,
+        } as any);
+      }
+      
+      return visibleData;
+    } else {
+      // 100条/页时使用普通分页，不需要虚拟滚动
+      return filteredCustomers.slice(pageStartIndex, pageEndIndex);
+    }
+  };
+
+  // 优化的表格滚动事件处理函数
+  const handleTableScroll = (e) => {
+    if (pageSize >= 500) {
+      // 使用requestAnimationFrame以避免频繁更新
+      if (!window['scrollTimer']) {
+        window['scrollTimer'] = requestAnimationFrame(() => {
+          setVirtualScroll(prev => prev + 1); // 使用一个计数器触发重新渲染
+          window['scrollTimer'] = null;
+        });
+      }
+    }
+  };
+
+  // 添加虚拟滚动状态
+  const [virtualScroll, setVirtualScroll] = useState(0);
+
+  // 更新计算当前页显示的数据函数
   const paginatedCustomers = useMemo(() => {
-    const startIndex = (currentPage - 1) * pageSize;
-    const endIndex = startIndex + pageSize;
-    return filteredCustomers.slice(startIndex, endIndex);
-  }, [filteredCustomers, currentPage, pageSize]);
+    return getVirtualCustomers();
+  }, [filteredCustomers, currentPage, pageSize, virtualScroll]);
 
   // 修改handleSearch函数，用于按钮点击和Enter键触发搜索
   const handleSearch = (value: string) => {
@@ -4077,6 +4222,20 @@ const CustomerList = () => {
             // 如果选择了设计师，自动填充电话
             if (value && typeof option === 'object' && 'phone' in option) {
               editForm.setFieldsValue({ designer_phone: option.phone });
+            } else if (!value) {
+              // 如果清空了设计师，也清空设计师电话
+              editForm.setFieldsValue({ designer_phone: '' });
+            }
+          }}
+          onSearch={(input) => {
+            // 当用户输入文本时，查找匹配的设计师并自动填充电话
+            if (input) {
+              const matchedDesigner = designers.find(
+                designer => designer.name && designer.name.includes(input)
+              );
+              if (matchedDesigner && matchedDesigner.phone) {
+                editForm.setFieldsValue({ designer_phone: matchedDesigner.phone });
+              }
             }
           }}
         />
@@ -4167,6 +4326,22 @@ const CustomerList = () => {
     );
   };
 
+  // 实现虚拟滚动的加载逻辑 - 修改为一次性加载所有数据
+  const loadMoreCustomers = () => {
+    // 直接加载所有数据，无需分批
+    setLoadedRecords(new Set(filteredCustomers.map(item => item.id || '')));
+    setVirtualPage(Math.ceil(filteredCustomers.length / VIRTUAL_PAGE_SIZE));
+  };
+
+  // 添加页面加载完成后的预加载函数
+  useEffect(() => {
+    // 当筛选后的客户数据已加载，预加载所有数据到缓存
+    if (filteredCustomers.length > 0 && !loading) {
+      console.log('页面加载完成，预加载所有数据到缓存...');
+      loadMoreCustomers();
+    }
+  }, [filteredCustomers.length, loading]);
+
   return (
     <div className="customer-list-container" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {renderTitleBar()}
@@ -4185,56 +4360,141 @@ const CustomerList = () => {
             tableLayout="fixed"
             size="middle"
             bordered
+            onScroll={handleTableScroll}
+            components={pageSize >= 500 ? {
+              body: {
+                row: (props) => {
+                  // 处理占位行
+                  if (props.children && props.children[0] && 
+                      props.children[0].props && 
+                      props.children[0].props.record && 
+                      props.children[0].props.record._isPlaceholder) {
+                    
+                    const height = props.children[0].props.record._height;
+                    return <tr style={{ height: `${height}px` }}><td colSpan={columns.length}></td></tr>;
+                  }
+                  return <tr {...props} />;
+                }
+              }
+            } : undefined}
             onChange={(pagination, filters, sorter) => {
               // 处理排序，确保所有客户都参与排序
               if (sorter && !Array.isArray(sorter)) {
                 const { field, order } = sorter;
                 if (field && order) {
-                  // 应用排序到所有filteredCustomers数据
-                  const sortFunc = (a: Customer, b: Customer) => {
-                    // 为field创建类型安全的访问
-                    const fieldKey = field as keyof Customer;
+                  // 使用Web Worker进行排序以避免阻塞UI线程
+                  if (window.Worker && filteredCustomers.length > 1000) {
+                    // 创建临时的排序Worker
+                    const workerBlob = new Blob([`
+                      self.onmessage = function(e) {
+                        const { data, field, order } = e.data;
+                        
+                        // 排序函数
+                        const sortFunc = (a, b) => {
+                          const aValue = a[field];
+                          const bValue = b[field];
+                          
+                          if (aValue === bValue) return 0;
+                          if (aValue === undefined || aValue === null) return order === 'ascend' ? -1 : 1;
+                          if (bValue === undefined || bValue === null) return order === 'ascend' ? 1 : -1;
+                          
+                          if (typeof aValue === 'string' && typeof bValue === 'string') {
+                            return order === 'ascend' 
+                              ? aValue.localeCompare(bValue) 
+                              : bValue.localeCompare(aValue);
+                          }
+                          
+                          if (typeof aValue === 'number' && typeof bValue === 'number') {
+                            return order === 'ascend' ? aValue - bValue : bValue - aValue;
+                          }
+                          
+                          return 0;
+                        };
+                        
+                        // 执行排序
+                        const sortedData = [...data].sort(sortFunc);
+                        
+                        // 返回排序结果
+                        self.postMessage(sortedData);
+                      };
+                    `], { type: 'application/javascript' });
                     
-                    // 找到对应的列定义
-                    const column = columns.find(col => {
-                      if (typeof col.key === 'string' && col.key === field) return true;
-                      if ('dataIndex' in col && col.dataIndex === field) return true;
-                      return false;
+                    const workerUrl = URL.createObjectURL(workerBlob);
+                    const worker = new Worker(workerUrl);
+                    
+                    // 设置加载状态
+                    setLoading(true);
+                    
+                    // 监听排序结果
+                    worker.onmessage = function(e) {
+                      const sortedData = e.data;
+                      setFilteredCustomers(sortedData);
+                      // 重置分页和虚拟滚动状态
+                      setCurrentPage(1);
+                      setVirtualPage(1);
+                      setLoadedRecords(new Set());
+                      setLoading(false);
+                      
+                      // 释放资源
+                      worker.terminate();
+                      URL.revokeObjectURL(workerUrl);
+                    };
+                    
+                    // 发送数据到Worker进行排序
+                    worker.postMessage({
+                      data: filteredCustomers,
+                      field: field,
+                      order: order
                     });
+                  } else {
+                    // 对于小数据集，使用常规排序
+                    const sortFunc = (a: Customer, b: Customer) => {
+                      // 为field创建类型安全的访问
+                      const fieldKey = field as keyof Customer;
+                      
+                      // 找到对应的列定义
+                      const column = columns.find(col => {
+                        if (typeof col.key === 'string' && col.key === field) return true;
+                        if ('dataIndex' in col && col.dataIndex === field) return true;
+                        return false;
+                      });
+                      
+                      // 如果列有自定义排序函数，使用它
+                      if (column && 'sorter' in column && typeof column.sorter === 'function') {
+                        const result = column.sorter(a, b);
+                        return order === 'ascend' ? result : -result;
+                      }
+                      
+                      // 否则使用默认排序逻辑
+                      const aValue = a[fieldKey];
+                      const bValue = b[fieldKey];
+                      
+                      if (aValue === bValue) return 0;
+                      if (aValue === undefined || aValue === null) return order === 'ascend' ? -1 : 1;
+                      if (bValue === undefined || bValue === null) return order === 'ascend' ? 1 : -1;
+                      
+                      if (typeof aValue === 'string' && typeof bValue === 'string') {
+                        return order === 'ascend' 
+                          ? aValue.localeCompare(bValue) 
+                          : bValue.localeCompare(aValue);
+                      }
+                      
+                      if (typeof aValue === 'number' && typeof bValue === 'number') {
+                        return order === 'ascend' ? aValue - bValue : bValue - aValue;
+                      }
+                      
+                      return 0;
+                    };
                     
-                    // 如果列有自定义排序函数，使用它
-                    if (column && 'sorter' in column && typeof column.sorter === 'function') {
-                      const result = column.sorter(a, b);
-                      return order === 'ascend' ? result : -result;
-                    }
+                    // 排序数据
+                    const sortedData = [...filteredCustomers].sort(sortFunc);
                     
-                    // 否则使用默认排序逻辑
-                    const aValue = a[fieldKey];
-                    const bValue = b[fieldKey];
-                    
-                    if (aValue === bValue) return 0;
-                    if (aValue === undefined || aValue === null) return order === 'ascend' ? -1 : 1;
-                    if (bValue === undefined || bValue === null) return order === 'ascend' ? 1 : -1;
-                    
-                    if (typeof aValue === 'string' && typeof bValue === 'string') {
-                      return order === 'ascend' 
-                        ? aValue.localeCompare(bValue) 
-                        : bValue.localeCompare(aValue);
-                    }
-                    
-                    if (typeof aValue === 'number' && typeof bValue === 'number') {
-                      return order === 'ascend' ? aValue - bValue : bValue - aValue;
-                    }
-                    
-                    return 0;
-                  };
-                  
-                  // 排序数据
-                  const sortedData = [...filteredCustomers].sort(sortFunc);
-                  
-                  // 更新排序后的数据
-                  setFilteredCustomers(sortedData);
-                  setCurrentPage(1); // 重置到第一页
+                    // 更新排序后的数据
+                    setFilteredCustomers(sortedData);
+                    setCurrentPage(1); // 重置到第一页
+                    setVirtualPage(1); // 重置虚拟滚动状态
+                    setLoadedRecords(new Set());
+                  }
                 }
               }
             }}
@@ -4252,11 +4512,11 @@ const CustomerList = () => {
             .customer-table .ant-table-cell {
               white-space: nowrap;
               min-width: 110px;
-              padding: 12px 16px;
+              padding: 8px 12px; /* 减小单元格内边距 */
               text-align: center;
             }
             .customer-table .ant-table-thead > tr > th {
-              padding: 12px 16px;
+              padding: 8px 12px; /* 减小表头内边距 */
               font-weight: bold;
               white-space: nowrap;
               background-color: #f0f5ff;
@@ -4284,6 +4544,20 @@ const CustomerList = () => {
             .customer-table .ant-table-thead .ant-table-cell-fix-left {
               background: #f0f5ff !important;
               z-index: 8;
+            }
+            
+            /* 性能优化相关样式 */
+            .customer-table .ant-table-body {
+              will-change: transform; /* 启用GPU加速 */
+              overflow-anchor: none; /* 禁用浏览器的滚动锚定优化 */
+            }
+            
+            .customer-table .ant-table-row:not(:hover) {
+              contain: layout style; /* 限制布局和样式计算范围 */
+            }
+            
+            .customer-table .ant-table-tbody .ant-table-row {
+              transition: none !important; /* 禁用行hover的过渡效果 */
             }
             
             .customer-list-container {
@@ -4319,6 +4593,12 @@ const CustomerList = () => {
               overflow-y: auto !important;
               height: auto !important;
               max-height: none !important;
+              overscroll-behavior: contain; /* 防止iOS的弹性滚动 */
+            }
+            
+            /* 禁用非必要的动画效果 */
+            .ant-table * {
+              animation-duration: 0s !important;
             }
           `}
         </style>
