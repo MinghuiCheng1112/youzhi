@@ -739,32 +739,78 @@ export const customerApi = {
    * 软删除客户（将客户标记为已删除而非物理删除）
    * 通过设置deleted_at字段为当前时间来实现软删除
    * @param {string} id - 客户ID
-   * @returns {Promise<void>} 无返回值
+   * @returns {Promise<boolean>} 删除是否成功
    */
-  delete: async (id: string): Promise<void> => {
-    const { error } = await supabase
-      .from('customers')
-      .update({ deleted_at: new Date().toISOString() })
-      .eq('id', id)
-
-    if (error) throw error
-    
-    // 从缓存中移除
-    dataCacheService.removeCustomer(id);
+  delete: async (id: string): Promise<boolean> => {
+    console.log(`开始执行客户删除操作(ID: ${id})`);
+    try {
+      // 尝试方法1: 直接UPDATE语句，不使用RPC
+      const { data, error } = await supabase
+        .from('customers')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', id)
+        .is('deleted_at', null);
+      
+      if (error) {
+        console.error(`客户删除操作(直接UPDATE)失败:`, error);
+        
+        // 尝试方法2: 使用RPC函数
+        console.log(`尝试使用RPC函数删除客户(ID: ${id})`);
+        const { data: rpcData, error: rpcError } = await supabase.rpc('direct_delete_customer', {
+          customer_id: id
+        });
+        
+        if (rpcError) {
+          console.error(`客户删除操作(RPC)也失败:`, rpcError);
+          return false;
+        }
+        
+        // RPC函数成功
+        console.log(`客户删除操作(RPC)成功(ID: ${id})`);
+        return true;
+      }
+      
+      // 直接UPDATE成功
+      console.log(`客户删除操作(直接UPDATE)成功(ID: ${id})`);
+      return true;
+    } catch (error) {
+      console.error(`客户删除操作出现异常:`, error);
+      return false;
+    }
   },
 
   /**
-   * 使用缓存服务删除客户（前端立即删除，后台静默处理）
+   * 使用缓存服务删除客户（确保数据库操作成功后再更新前端缓存）
    * @param {string} id - 客户ID
+   * @returns {Promise<boolean>} 删除是否成功
    */
-  deleteWithCache: (id: string): void => {
-    // 从缓存中移除
-    dataCacheService.removeCustomer(id);
-    
-    // 后台静默删除
-    customerApi.delete(id).catch(error => {
-      console.error('静默删除客户失败:', error);
-    });
+  deleteWithCache: async (id: string): Promise<boolean> => {
+    console.log(`开始执行带缓存的客户删除(ID: ${id})`);
+    try {
+      // 先获取客户信息，确保客户存在于缓存中
+      const cachedCustomer = dataCacheService.getCustomer(id);
+      if (!cachedCustomer) {
+        console.error(`客户在缓存中不存在(ID: ${id})，尝试执行直接删除`);
+      } else {
+        console.log(`准备删除客户: ${cachedCustomer.customer_name} (ID: ${id})`);
+      }
+      
+      // 直接删除客户
+      const success = await customerApi.delete(id);
+      
+      if (success) {
+        console.log(`数据库删除成功，现在更新前端缓存(ID: ${id})`);
+        // 数据库删除成功后，从缓存中移除
+        dataCacheService.removeCustomer(id);
+        return true;
+      } else {
+        console.error(`数据库删除失败，不更新前端缓存(ID: ${id})`);
+        return false;
+      }
+    } catch (error) {
+      console.error(`带缓存的客户删除操作出现异常:`, error);
+      return false;
+    }
   },
 
   /**
@@ -1232,13 +1278,27 @@ export const recordApi = {
    * @returns {Promise<ModificationRecord[]>} 修改记录数组
    */
   getAll: async (): Promise<any[]> => {
-    const { data, error } = await supabase
-      .from('modification_records')
-      .select('*, customers(customer_name)')
-      .order('modified_at', { ascending: false })
-
-    if (error) throw error
-    return data || []
+    try {
+      // 尝试从带有中文字段名和修改人信息的视图中获取数据
+      const { data, error } = await supabase
+        .from('modification_records_with_names')
+        .select('*')
+        .order('modified_at', { ascending: false })
+      
+      if (error) throw error
+      return data || []
+    } catch (error) {
+      console.error('无法从修改记录视图获取数据，使用备用方法', error)
+      
+      // 备用方法：从原始表获取
+      const { data, error: fallbackError } = await supabase
+        .from('modification_records')
+        .select('*, customers(customer_name)')
+        .order('modified_at', { ascending: false })
+      
+      if (fallbackError) throw fallbackError
+      return data || []
+    }
   }
 }
 
@@ -1248,6 +1308,10 @@ export const recordApi = {
  * 用于管理软删除的客户记录
  */
 export const deletedRecordsApi = {
+  /**
+   * 获取所有已删除的客户记录
+   * 从customers表中查询被标记为已删除的记录
+   */
   async getDeletedRecords() {
     try {
       const { data, error } = await supabase.rpc('get_deleted_records');
@@ -1264,66 +1328,145 @@ export const deletedRecordsApi = {
     }
   },
   
-  async getRestoredRecords() {
+  /**
+   * 恢复已删除的客户记录
+   * 将客户的deleted_at字段设置为NULL
+   * @param id 要恢复的客户ID
+   */
+  async restoreDeletedRecord(id: string) {
     try {
-      const { data, error } = await supabase.rpc('get_restored_records');
-      
-      if (error) {
-        console.error('获取已恢复记录失败:', error);
-        return { data: null, error };
-      }
-      
-      return { data, error: null };
-    } catch (error) {
-      console.error('获取已恢复记录出现异常:', error);
-      return { data: null, error };
-    }
-  },
-  
-  async restoreDeletedRecord(recordId: string) {
-    try {
+      console.log(`开始恢复客户(ID: ${id})`);
       const { data, error } = await supabase.rpc('restore_deleted_record', {
-        record_id: recordId
+        customer_id: id
       });
       
       if (error) {
-        console.error('恢复删除记录失败:', error);
+        console.error('恢复记录失败:', error);
         return { success: false, error };
       }
       
-      return { success: true, error: null };
+      // 新函数返回布尔值表示成功或失败
+      if (data === true) {
+        console.log(`客户(ID: ${id})恢复成功`);
+        return { success: true, error: null };
+      } else {
+        console.error(`客户(ID: ${id})恢复失败，找不到记录或记录已被恢复`);
+        return { success: false, error: '记录不存在或已被恢复' };
+      }
     } catch (error) {
-      console.error('恢复删除记录出现异常:', error);
+      console.error('恢复记录出现异常:', error);
       return { success: false, error };
     }
   },
   
-  async batchRestoreDeletedRecords(recordIds: string[]) {
+  /**
+   * 批量恢复已删除的客户记录
+   * @param ids 要恢复的客户ID数组
+   */
+  async batchRestoreDeletedRecords(ids: string[]) {
     try {
-      // 使用Promise.all并行处理多个恢复请求
-      const results = await Promise.all(
-        recordIds.map(id => this.restoreDeletedRecord(id))
-      );
+      console.log(`开始批量恢复客户, 共${ids.length}个`);
+      const { data, error } = await supabase.rpc('batch_restore_deleted_records', {
+        customer_ids: ids
+      });
       
-      // 检查是否有任何恢复失败
-      const hasFailures = results.some(result => !result.success);
+      if (error) {
+        console.error('批量恢复记录失败:', error);
+        return { success: false, error, results: [] };
+      }
       
-      if (hasFailures) {
-        const failedCount = results.filter(result => !result.success).length;
-        return {
-          success: false,
-          error: `${failedCount}/${recordIds.length} 个记录恢复失败`,
-          results
+      console.log(`批量恢复操作完成，结果:`, data);
+      
+      // 检查结果
+      if (data && Array.isArray(data)) {
+        const successCount = data.filter(item => item.success).length;
+        const success = successCount === ids.length;
+        
+        console.log(`批量恢复结果: 成功=${successCount}, 总计=${ids.length}`);
+        
+        return { 
+          success, 
+          error: success ? null : '部分记录恢复失败', 
+          results: data 
         };
       }
       
-      return { success: true, error: null, results };
+      return { success: false, error: '恢复操作未返回预期结果', results: [] };
     } catch (error) {
-      console.error('批量恢复删除记录出现异常:', error);
+      console.error('批量恢复记录出现异常:', error);
+      return { success: false, error, results: [] };
+    }
+  },
+
+  /**
+   * 永久删除客户记录（彻底从数据库中删除）
+   * @param id 要删除的客户ID
+   */
+  async permanentlyDeleteRecord(id: string) {
+    try {
+      console.log(`开始永久删除客户(ID: ${id})`);
+      const { data, error } = await supabase.rpc('permanently_delete_record', {
+        customer_id: id
+      });
+      
+      if (error) {
+        console.error('永久删除记录失败:', error);
+        return { success: false, error };
+      }
+      
+      // 函数返回布尔值表示成功或失败
+      if (data === true) {
+        console.log(`客户(ID: ${id})永久删除成功`);
+        return { success: true, error: null };
+      } else {
+        console.error(`客户(ID: ${id})永久删除失败，找不到记录`);
+        return { success: false, error: '记录不存在' };
+      }
+    } catch (error) {
+      console.error('永久删除记录出现异常:', error);
+      return { success: false, error };
+    }
+  },
+  
+  /**
+   * 批量永久删除客户记录
+   * @param ids 要永久删除的客户ID数组
+   */
+  async batchPermanentlyDeleteRecords(ids: string[]) {
+    try {
+      console.log(`开始批量永久删除客户, 共${ids.length}个`);
+      const { data, error } = await supabase.rpc('batch_permanently_delete_records', {
+        customer_ids: ids
+      });
+      
+      if (error) {
+        console.error('批量永久删除记录失败:', error);
+        return { success: false, error, results: [] };
+      }
+      
+      console.log(`批量永久删除操作完成，结果:`, data);
+      
+      // 检查结果
+      if (data && Array.isArray(data)) {
+        const successCount = data.filter(item => item.success).length;
+        const success = successCount === ids.length;
+        
+        console.log(`批量永久删除结果: 成功=${successCount}, 总计=${ids.length}`);
+        
+        return { 
+          success, 
+          error: success ? null : '部分记录永久删除失败', 
+          results: data 
+        };
+      }
+      
+      return { success: false, error: '永久删除操作未返回预期结果', results: [] };
+    } catch (error) {
+      console.error('批量永久删除记录出现异常:', error);
       return { success: false, error, results: [] };
     }
   }
-}
+};
 
 /**
  * 用于抽签工作台选择施工队

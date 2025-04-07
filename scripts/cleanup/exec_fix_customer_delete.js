@@ -4,19 +4,19 @@
  * 用于检查和修复客户删除失败的问题
  */
 
-require('dotenv').config({ path: '.env.db' });
+require('dotenv').config(); // 使用主环境变量文件
 const fs = require('fs');
 const { Client } = require('pg');
 const path = require('path');
 
 // 数据库连接配置
 const dbConfig = {
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  host: process.env.DB_HOST,
-  port: process.env.DB_PORT,
-  database: process.env.DB_NAME,
-  ssl: false // 禁用SSL连接
+  user: process.env.SUPABASE_DB_USER || process.env.SUPABASE_USER,
+  password: process.env.SUPABASE_DB_PASSWORD || process.env.SUPABASE_PASSWORD,
+  host: process.env.SUPABASE_DB_HOST || process.env.SUPABASE_HOST,
+  port: process.env.SUPABASE_DB_PORT || process.env.SUPABASE_PORT,
+  database: process.env.SUPABASE_DB_NAME || process.env.SUPABASE_DATABASE,
+  ssl: { rejectUnauthorized: false } // 允许自签名证书
 };
 
 // 颜色配置

@@ -82,6 +82,7 @@ const RecordingList = () => {
       filtered = filtered.filter(record => 
         record.customer_name?.toLowerCase().includes(searchValue) ||
         record.modified_by?.toLowerCase().includes(searchValue) ||
+        record.modified_by_name?.toLowerCase().includes(searchValue) ||
         record.field_name?.toLowerCase().includes(searchValue) ||
         record.old_value?.toLowerCase().includes(searchValue) ||
         record.new_value?.toLowerCase().includes(searchValue) ||
@@ -115,12 +116,14 @@ const RecordingList = () => {
       setLoading(true)
       const data = await recordApi.getAll()
       
-      // 处理返回的数据结构，确保客户姓名正确显示
+      // 处理返回的数据结构，确保客户姓名和修改人正确显示
       const formattedData = data.map(record => ({
         ...record,
         customer_name: record.customers?.customer_name || record.customer_name || '-',
         // 标准化字段名称，移除可能的前缀
-        field_name: record.field_name ? record.field_name.replace(/^customers\./, '') : record.field_name
+        field_name: record.field_name ? record.field_name.replace(/^customers\./, '') : record.field_name,
+        // 确保修改人字段存在
+        modified_by_name: record.modified_by_name || record.modified_by_email || record.modified_by || '-'
       }))
       
       console.log('修改记录数据:', formattedData)
@@ -138,26 +141,36 @@ const RecordingList = () => {
   // 获取用户名称映射
   const fetchUserNames = async () => {
     try {
+      // 从user_roles表获取用户信息
       const { data, error } = await supabase
         .from('user_roles')
-        .select('email, name')
+        .select('email, name, user_id');
       
-      if (error) throw error
+      if (error) throw error;
       
-      const nameMap: Record<string, string> = {}
+      const nameMap: Record<string, string> = {};
       if (data) {
         data.forEach(user => {
-          if (user.email && user.name) {
-            nameMap[user.email] = user.name
+          if (user.name) {
+            // 添加多种键以增加匹配成功率
+            if (user.user_id) nameMap[user.user_id] = user.name;
+            if (user.email) nameMap[user.email] = user.name;
           }
-        })
+        });
       }
       
-      setUserNames(nameMap)
+      // 添加默认管理员
+      nameMap['admin'] = '管理员';
+      
+      console.log('获取到的用户映射:', nameMap);
+      setUserNames(nameMap);
     } catch (error) {
-      console.error('获取用户名称失败', error)
+      console.error('获取用户名称失败', error);
+      
+      // 备用方案：使用默认值
+      setUserNames({ 'admin': '管理员' });
     }
-  }
+  };
   
   // 重置过滤器
   const resetFilters = () => {
@@ -187,6 +200,7 @@ const RecordingList = () => {
       render: (text: string) => dayjs(text).format('YYYY-MM-DD HH:mm:ss'),
       sorter: (a: any, b: any) => new Date(a.modified_at).getTime() - new Date(b.modified_at).getTime(),
       defaultSortOrder: 'descend' as 'descend',
+      width: 180,
     },
     {
       title: '客户',
@@ -194,6 +208,7 @@ const RecordingList = () => {
       key: 'customer_name',
       sorter: (a: any, b: any) => (a.customer_name || '').localeCompare(b.customer_name || ''),
       render: (text: string) => text || '-',
+      width: 150,
     },
     {
       title: '修改字段',
@@ -203,9 +218,9 @@ const RecordingList = () => {
       render: (fieldName: string) => {
         // 尝试查找映射，如果没有则显示原字段名
         const chineseName = fieldNameMapping[fieldName] || fieldName;
-        console.log(`字段映射: ${fieldName} -> ${chineseName}`);
         return chineseName;
       },
+      width: 150,
     },
     {
       title: '原值',
@@ -213,6 +228,7 @@ const RecordingList = () => {
       key: 'old_value',
       ellipsis: true,
       render: (text: string) => text || '-',
+      width: 150,
     },
     {
       title: '新值',
@@ -220,34 +236,58 @@ const RecordingList = () => {
       key: 'new_value',
       ellipsis: true,
       render: (text: string) => text || '-',
+      width: 150,
     },
     {
       title: '修改人',
-      dataIndex: 'modified_by',
-      key: 'modified_by',
-      sorter: (a: any, b: any) => (a.modified_by || '').localeCompare(b.modified_by || ''),
-      render: (email: string) => {
-        // 如果是UUID格式，显示为系统自动
-        if (email && (email.includes('-') && email.length > 30)) {
-          console.log(`检测到UUID: ${email}`);
+      dataIndex: 'modified_by_name',
+      key: 'modified_by_name',
+      sorter: (a: any, b: any) => (a.modified_by_name || '').localeCompare(b.modified_by_name || ''),
+      render: (text: string, record: any) => {
+        // 1. 如果是UUID格式，可能是系统操作或需要查找用户名
+        if (record.modified_by && record.modified_by.includes('-') && record.modified_by.length > 30) {
+          // 尝试从用户映射中查找
+          const userName = userNames[record.modified_by];
+          if (userName) {
+            return userName;
+          }
+          
+          // 若无法找到用户名，则显示为系统自动
           return '系统自动';
         }
         
-        // 如果在用户名映射中找到，则显示用户名
-        if (userNames[email]) {
-          console.log(`找到用户名映射: ${email} -> ${userNames[email]}`);
-          return userNames[email];
+        // 2. 检查是否有直接可用的用户名
+        if (record.modified_by_name && record.modified_by_name !== '-' && 
+            !record.modified_by_name.includes('@') && 
+            !record.modified_by_name.includes('-')) {
+          return record.modified_by_name;
         }
         
-        // 否则显示原始值
-        console.log(`未找到用户名映射: ${email}`);
-        return email || '-';
+        // 3. 检查邮箱映射
+        if (record.modified_by && userNames[record.modified_by]) {
+          return userNames[record.modified_by];
+        }
+        
+        // 4. 检查修改人邮箱
+        if (record.modified_by_email && userNames[record.modified_by_email]) {
+          return userNames[record.modified_by_email];
+        }
+        
+        // 5. 如果都找不到，但email看起来像邮箱，直接显示
+        if (record.modified_by && record.modified_by.includes('@')) {
+          const emailParts = record.modified_by.split('@');
+          return emailParts[0] || record.modified_by; // 只显示邮箱用户名部分
+        }
+        
+        // 6. 最后的后备选项
+        return record.modified_by || text || '-';
       },
+      width: 120,
     },
   ]
   
   return (
-    <div>
+    <div style={{ padding: '20px', height: 'calc(100vh - 80px)', display: 'flex', flexDirection: 'column' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
         <Title level={2}>修改记录</Title>
         <Space>
@@ -266,7 +306,7 @@ const RecordingList = () => {
         </Space>
       </div>
       
-      <Card>
+      <Card style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ marginBottom: 16, display: 'flex', gap: 16 }}>
           <Input
             placeholder="搜索客户、修改人等"
@@ -297,17 +337,24 @@ const RecordingList = () => {
           />
         </div>
         
-        <Table
-          columns={columns}
-          dataSource={filteredRecords}
-          rowKey="id"
-          loading={loading}
-          pagination={{ 
-            pageSize: 10, 
-            showSizeChanger: true, 
-            showTotal: (total) => `共 ${total} 条记录` 
-          }}
-        />
+        <div style={{ flex: 1, overflow: 'hidden' }}>
+          <Table
+            columns={columns}
+            dataSource={filteredRecords}
+            rowKey="id"
+            loading={loading}
+            pagination={{ 
+              pageSize: 20, 
+              showSizeChanger: true, 
+              showTotal: (total) => `共 ${total} 条记录`,
+              position: ['bottomCenter'],
+              style: { marginBottom: 0 }
+            }}
+            scroll={{ x: '100%', y: 'calc(100% - 56px)' }}
+            style={{ height: '100%' }}
+            size="middle"
+          />
+        </div>
       </Card>
     </div>
   )
