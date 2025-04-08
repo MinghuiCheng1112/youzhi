@@ -207,7 +207,17 @@ const CustomerList = () => {
               .select('name, phone, email, user_id')
               .eq('role', 'salesman')
               .then(({ data: salesmenData, error }) => {
-                if (error) throw error;
+                if (error) {
+                  console.error('获取业务员信息失败:', error);
+                  
+                  // 发生错误时仍然使用客户数据中提取的业务员信息
+                  const salesmenArray = Array.from(salesmen).map(([name, phone]) => ({
+                    name,
+                    phone
+                  }));
+                  setSalesmenList(salesmenArray);
+                  return;
+                }
                 
                 // 将从user_roles表获取的业务员信息合并到映射中
                 if (salesmenData) {
@@ -275,8 +285,8 @@ const CustomerList = () => {
                   phone
                 }));
                 setSalesmenList(salesmenArray);
-              })
-              .catch(error => {
+              }, error => {
+                // 使用then的第二个参数处理错误
                 console.error('获取业务员信息失败:', error);
                 
                 // 发生错误时仍然使用客户数据中提取的业务员信息
