@@ -70,6 +70,12 @@ const WarehouseManagerDashboard = () => {
   // 添加防抖搜索
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
   
+  // 添加搜索加载状态
+  const [searchLoading, setSearchLoading] = useState(false);
+  
+  // 添加显示的结果数量上限
+  const [displayLimit, setDisplayLimit] = useState(100);
+  
   // 使用useCallback封装搜索逻辑
   const handleSearch = useCallback((value: string) => {
     // 设置搜索文本
@@ -80,6 +86,15 @@ const WarehouseManagerDashboard = () => {
       clearTimeout(debounceTimer.current);
     }
     
+    // 空字符串直接返回所有数据，无需过滤
+    if (!value.trim()) {
+      setFilteredCustomers(customers);
+      return;
+    }
+    
+    // 显示搜索加载状态
+    setSearchLoading(true);
+    
     // 设置新的定时器
     debounceTimer.current = setTimeout(() => {
       const lowercasedFilter = value.toLowerCase();
@@ -87,21 +102,111 @@ const WarehouseManagerDashboard = () => {
       // 性能监控 - 开始过滤
       console.time('搜索过滤');
       
-      const filtered = customers.filter(item => {
-        return (
-          (item.customer_name && item.customer_name.toLowerCase().includes(lowercasedFilter)) ||
-          (item.phone && item.phone.toLowerCase().includes(lowercasedFilter)) ||
-          (item.address && item.address.toLowerCase().includes(lowercasedFilter)) ||
-          (item.salesman && item.salesman.toLowerCase().includes(lowercasedFilter)) ||
-          (item.construction_team && item.construction_team.toLowerCase().includes(lowercasedFilter))
-        );
-      });
-      
-      setFilteredCustomers(filtered);
-      
-      // 性能监控 - 结束过滤
-      console.timeEnd('搜索过滤');
-    }, 300); // 300ms防抖延迟
+      // 是否使用Web Worker（大数据集才使用）
+      if (window.Worker && customers.length > 1000) {
+        // 创建一次性的Worker进行搜索
+        const workerCode = `
+          self.onmessage = function(e) {
+            const { customers, searchText } = e.data;
+            const lowercasedFilter = searchText.toLowerCase();
+            
+            const filtered = customers.filter(item => {
+              return (
+                (item.customer_name && item.customer_name.toLowerCase().includes(lowercasedFilter)) ||
+                (item.phone && item.phone.toLowerCase().includes(lowercasedFilter)) ||
+                (item.address && item.address.toLowerCase().includes(lowercasedFilter)) ||
+                (item.salesman && item.salesman.toLowerCase().includes(lowercasedFilter)) ||
+                (item.construction_team && item.construction_team.toLowerCase().includes(lowercasedFilter))
+              );
+            });
+            
+            self.postMessage(filtered);
+          };
+        `;
+        
+        // 创建Blob和Worker
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        const workerUrl = URL.createObjectURL(blob);
+        const worker = new Worker(workerUrl);
+        
+        // 接收搜索结果
+        worker.onmessage = function(e) {
+          const results = e.data;
+          
+          // 如果结果很多，先只显示部分，避免界面卡顿
+          if (results.length > 100) {
+            // 先显示前100条
+            setFilteredCustomers(results.slice(0, 100));
+            setDisplayLimit(100);
+            
+            // 在下一帧显示所有结果
+            requestAnimationFrame(() => {
+              setFilteredCustomers(results);
+              setDisplayLimit(results.length);
+            });
+          } else {
+            setFilteredCustomers(results);
+            setDisplayLimit(results.length);
+          }
+          
+          setSearchLoading(false);
+          
+          // 释放资源
+          worker.terminate();
+          URL.revokeObjectURL(workerUrl);
+          
+          // 性能监控 - 结束过滤（Web Worker）
+          console.timeEnd('搜索过滤');
+        };
+        
+        // 发送数据进行搜索
+        worker.postMessage({
+          customers: customers,
+          searchText: value
+        });
+      } else {
+        // 常规搜索处理（小数据集）
+        // 优化搜索逻辑：跳过空值检查，减少重复判断
+        const filtered = customers.filter(item => {
+          // 只有在字段有值时才进行搜索比较，避免无效操作
+          const nameMatch = item.customer_name ? item.customer_name.toLowerCase().includes(lowercasedFilter) : false;
+          if (nameMatch) return true; // 提前返回，减少后续比较
+          
+          const phoneMatch = item.phone ? item.phone.toLowerCase().includes(lowercasedFilter) : false;
+          if (phoneMatch) return true;
+          
+          const addressMatch = item.address ? item.address.toLowerCase().includes(lowercasedFilter) : false;
+          if (addressMatch) return true;
+          
+          const salesmanMatch = item.salesman ? item.salesman.toLowerCase().includes(lowercasedFilter) : false;
+          if (salesmanMatch) return true;
+          
+          const teamMatch = item.construction_team ? item.construction_team.toLowerCase().includes(lowercasedFilter) : false;
+          return teamMatch;
+        });
+        
+        // 如果结果很多，分批渲染
+        if (filtered.length > 100) {
+          // 先显示前100条
+          setFilteredCustomers(filtered.slice(0, 100));
+          setDisplayLimit(100);
+          
+          // 在下一帧显示所有结果
+          requestAnimationFrame(() => {
+            setFilteredCustomers(filtered);
+            setDisplayLimit(filtered.length);
+          });
+        } else {
+          setFilteredCustomers(filtered);
+          setDisplayLimit(filtered.length);
+        }
+        
+        setSearchLoading(false);
+        
+        // 性能监控 - 结束过滤
+        console.timeEnd('搜索过滤');
+      }
+    }, 500); // 增加到500ms防抖延迟
   }, [customers]);
   
   // 清除防抖定时器
@@ -1050,6 +1155,7 @@ const WarehouseManagerDashboard = () => {
             onChange={(e) => handleSearch(e.target.value)}
             style={{ width: 250 }}
             prefix={<SearchOutlined />}
+            suffix={searchLoading ? <ClockCircleOutlined spin /> : null}
             allowClear
           />
           <Button 
@@ -1155,12 +1261,18 @@ const WarehouseManagerDashboard = () => {
           rowKey="id"
           loading={loading}
           scroll={{ x: 'max-content', y: 'calc(100vh - 200px)' }}
-          pagination={false}
+          pagination={filteredCustomers.length > 100 ? {
+            pageSize: 100,
+            showSizeChanger: true,
+            pageSizeOptions: ['50', '100', '200'],
+            total: filteredCustomers.length,
+            showTotal: (total) => `共 ${total} 条数据`
+          } : false}
           bordered
           size="middle"
           tableLayout="fixed"
           className="customer-table"
-          style={{ flex: 1, overflow: 'auto' }}
+          style={{ flex: 1 }}
           sticky={{ offsetHeader: 0 }}
         />
       </div>
@@ -1322,6 +1434,21 @@ const WarehouseManagerDashboard = () => {
             flex-direction: column;
           }
           
+          /* 优化搜索组件性能 */
+          .ant-input-affix-wrapper {
+            will-change: contents;
+            transition: all 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+          }
+          
+          .ant-input-affix-wrapper > input.ant-input {
+            will-change: value;
+          }
+          
+          /* 提高渲染性能 */
+          .warehouse-dashboard * {
+            backface-visibility: hidden;
+          }
+          
           /* 美化滚动条 - 针对整个页面的所有滚动条 */
           *::-webkit-scrollbar {
             width: 12px;
@@ -1364,7 +1491,7 @@ const WarehouseManagerDashboard = () => {
           
           /* 客户列表容器 */
           .customer-list-container {
-            overflow: auto;
+            overflow: hidden;
             flex: 1;
             display: flex;
             flex-direction: column;
@@ -1396,6 +1523,7 @@ const WarehouseManagerDashboard = () => {
           .ant-table-body {
             flex: 1;
             overflow-y: auto !important;
+            overflow-x: auto !important;
             height: auto !important;
             max-height: none !important;
           }

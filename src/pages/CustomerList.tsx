@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { Table, Button, Input, Space, message, Modal, Tag, Tooltip, Typography, Upload, Drawer, Divider, Select, DatePicker, Form, Radio, InputNumber, Dropdown, Menu, AutoComplete, Checkbox, Row, Col } from 'antd'
 import { 
   PlusOutlined, 
@@ -31,6 +31,13 @@ const { Title } = Typography
 const { confirm } = Modal
 const { Dragger } = Upload
 
+// 扩展Window接口，添加scrollTimer属性
+declare global {
+  interface Window {
+    scrollTimer: ReturnType<typeof setTimeout> | null;
+  }
+}
+
 // 手动定义OutboundStatus类型
 type OutboundStatus = 'none' | 'outbound' | 'inbound' | 'returned';
 
@@ -53,15 +60,21 @@ const CustomerList = () => {
   const [pageSize, setPageSize] = useState<number>(100)
   const [currentPage, setCurrentPage] = useState<number>(1)
   const [totalPages, setTotalPages] = useState<number>(1)
-  // 添加虚拟滚动相关状态
-  const [virtualPage, setVirtualPage] = useState<number>(1)
-  const [virtualLoading, setVirtualLoading] = useState<boolean>(false)
-  const [loadedRecords, setLoadedRecords] = useState<Set<string>>(new Set())
+  // 添加缓存页面数据的状态
+  const [cachedPageData, setCachedPageData] = useState<{[key: number]: Customer[]}>({})
+  // 添加是否正在后台加载数据的状态
+  const [isBackgroundLoading, setIsBackgroundLoading] = useState(false)
+  // 添加上一次的页面大小
+  const [previousPageSize, setPreviousPageSize] = useState<number>(100)
+  // 添加用于存储预渲染数据的状态
+  const [preRenderedData, setPreRenderedData] = useState<Customer[]>([])
+  // 用于控制编辑时的性能优化
+  const editingRef = useRef<boolean>(false)
 
   // 限制每次最大加载记录数以提高性能
   const MAX_RECORDS_PER_LOAD = 500; // 恢复合理的数据量限制
-  // 虚拟滚动时每页加载的记录数
-  const VIRTUAL_PAGE_SIZE = 200; // 适当大小的分页数量
+  // 添加虚拟滚动页大小常量
+  const VIRTUAL_PAGE_SIZE = 100; // 在大页面模式下使用虚拟滚动分页
 
   const STATION_MANAGEMENT_OPTIONS = [
     { value: '房产证', label: '房产证', color: 'blue' },
@@ -178,7 +191,7 @@ const CustomerList = () => {
         // 更新状态，保留之前处理的数据
         setCustomers(prev => [...prev, ...processedBatch]);
         setFilteredCustomers(prev => [...prev, ...processedBatch]);
-        
+            
         // 检查是否还有更多数据需要处理
         if (endIndex < data.length) {
           // 使用setTimeout避免阻塞UI
@@ -190,122 +203,6 @@ const CustomerList = () => {
           console.log('所有客户数据处理完成');
           setTotalPages(Math.ceil(data.length / pageSize)); // 更新总页数
           setLoading(false);
-          
-          // 先从已有客户中提取业务员信息
-          const salesmen = new Map<string, string>()
-          data.forEach(customer => {
-            if (customer.salesman && customer.salesman.trim() !== '') {
-              salesmen.set(customer.salesman, customer.salesman_phone || '')
-            }
-          })
-          
-          // 再从user_roles表获取所有业务员信息
-          try {
-            // 改用Promise链式调用而不是await
-            supabase
-              .from('user_roles')
-              .select('name, phone, email, user_id')
-              .eq('role', 'salesman')
-              .then(({ data: salesmenData, error }) => {
-                if (error) {
-                  console.error('获取业务员信息失败:', error);
-                  
-                  // 发生错误时仍然使用客户数据中提取的业务员信息
-                  const salesmenArray = Array.from(salesmen).map(([name, phone]) => ({
-                    name,
-                    phone
-                  }));
-                  setSalesmenList(salesmenArray);
-                  return;
-                }
-                
-                // 将从user_roles表获取的业务员信息合并到映射中
-                if (salesmenData) {
-                  // 根据业务员表进行一次初始检查，将邮箱格式的业务员字段转换为姓名
-                  const salesmenEmailMap = new Map<string, {name: string, phone: string}>();
-                  
-                  salesmenData.forEach(salesman => {
-                    if (salesman.name && salesman.name.trim() !== '') {
-                      // 只有当salesmen中不存在此业务员或电话为空时才更新
-                      if (!salesmen.has(salesman.name) || !salesmen.get(salesman.name)) {
-                        salesmen.set(salesman.name, salesman.phone || '');
-                      }
-                      
-                      // 如果有邮箱，记录邮箱到姓名的映射
-                      if (salesman.email) {
-                        salesmenEmailMap.set(salesman.email, {
-                          name: salesman.name,
-                          phone: salesman.phone || ''
-                        });
-                      }
-                      
-                      // 如果有用户ID，也尝试获取关联邮箱
-                      if (salesman.user_id) {
-                        // 这里需要异步，但为了简单，我们会在后面单独更新包含邮箱的客户
-                        console.log('记录业务员ID关联:', salesman.user_id, salesman.name);
-                      }
-                    }
-                  });
-                  
-                  // 检查客户列表，更新所有使用邮箱作为业务员的记录
-                  let needUpdateCustomers = false;
-                  const updatedCustomers = data.map(customer => {
-                    if (customer.salesman && typeof customer.salesman === 'string' && customer.salesman.includes('@')) {
-                      const matchedSalesman = salesmenEmailMap.get(customer.salesman);
-                      if (matchedSalesman) {
-                        needUpdateCustomers = true;
-                        console.log(`发现业务员邮箱 ${customer.salesman}，自动转换为 ${matchedSalesman.name}`);
-                        
-                        // 立即更新业务员信息
-                        setTimeout(() => {
-                          handleUpdateSalesmanName(customer.id as string, customer.salesman as string, matchedSalesman.name, matchedSalesman.phone || '');
-                        }, 0);
-                        
-                        // 返回更新后的客户对象
-                        return {
-                          ...customer,
-                          salesman: matchedSalesman.name,
-                          salesman_phone: matchedSalesman.phone || customer.salesman_phone
-                        };
-                      }
-                    }
-                    return customer;
-                  });
-                  
-                  // 如果有更新，刷新客户列表
-                  if (needUpdateCustomers) {
-                    setCustomers(updatedCustomers);
-                    setFilteredCustomers(updatedCustomers);
-                  }
-                }
-                
-                // 构建业务员数组并更新状态
-                const salesmenArray = Array.from(salesmen).map(([name, phone]) => ({
-                  name,
-                  phone
-                }));
-                setSalesmenList(salesmenArray);
-              }, error => {
-                // 使用then的第二个参数处理错误
-                console.error('获取业务员信息失败:', error);
-                
-                // 发生错误时仍然使用客户数据中提取的业务员信息
-                const salesmenArray = Array.from(salesmen).map(([name, phone]) => ({
-                  name,
-                  phone
-                }));
-                setSalesmenList(salesmenArray);
-              });
-          } catch (error) {
-            console.error('获取业务员信息失败:', error);
-            
-            // 构建业务员数组并更新状态
-            const salesmenArray = Array.from(salesmen).map(([name, phone]) => ({
-              name,
-              phone
-            }));
-            setSalesmenList(salesmenArray);
-          }
         }
       };
       
@@ -412,9 +309,7 @@ const CustomerList = () => {
     if (!value.trim()) {
       setFilteredCustomers(customers);
       setTotalPages(Math.ceil(customers.length / pageSize));
-      // 重置虚拟滚动状态
-      setVirtualPage(1);
-      setLoadedRecords(new Set());
+      setCurrentPage(1); // 重置到第一页
       return;
     }
 
@@ -446,9 +341,7 @@ const CustomerList = () => {
     
     setFilteredCustomers(filtered);
     setTotalPages(Math.ceil(filtered.length / pageSize));
-    // 重置虚拟滚动状态
-    setVirtualPage(1);
-    setLoadedRecords(new Set());
+    setCurrentPage(1); // 重置到第一页
   };
   
   // 使用立即处理的方式代替防抖，避免延迟
@@ -471,38 +364,93 @@ const CustomerList = () => {
   // 开始编辑单元格
   const edit = (record: Customer, dataIndex: string) => {
     console.log('开始编辑字段:', dataIndex, '客户ID:', record.id, '当前值:', record[dataIndex as keyof Customer]);
-    setEditingCell({ id: record.id, dataIndex });
     
-    // 如果是编辑施工队，预先设置施工队电话到表单
-    if (dataIndex === 'construction_team') {
-      const currentTeam = record.construction_team;
-      const currentPhone = record.construction_team_phone;
-      console.log('编辑施工队:', currentTeam, '当前电话:', currentPhone);
-      
-      // 用于防止电话覆盖
+    // 标记正在编辑状态，避免虚拟滚动重新计算
+    editingRef.current = true;
+    
+    // 在大页面模式下，确保在状态更新前先设置表单值，避免延迟
+    if (pageSize >= 500) {
+      // 先设置表单值，再设置编辑状态
       editForm.setFieldsValue({
-        construction_team: currentTeam,
-        construction_team_phone: currentPhone
+        [dataIndex]: record[dataIndex as keyof Customer]
       });
-    }
-    
-    // 设置当前编辑字段的值到表单
+      
+      // 针对特定字段的处理
+      if (dataIndex === 'construction_team') {
+        const currentTeam = record.construction_team;
+        const currentPhone = record.construction_team_phone;
+        console.log('编辑施工队:', currentTeam, '当前电话:', currentPhone);
+        
         editForm.setFieldsValue({
-      [dataIndex]: record[dataIndex as keyof Customer]
-    });
-    
-    // 针对特定字段的处理
-    if (dataIndex === 'salesman') {
-      // 同时设置业务员电话
+          construction_team: currentTeam,
+          construction_team_phone: currentPhone
+        });
+      } else if (dataIndex === 'salesman') {
+        // 同时设置业务员电话
         editForm.setFieldsValue({
-        salesman_phone: record.salesman_phone
+          salesman_phone: record.salesman_phone
+        });
+      } else if (dataIndex === 'designer') {
+        // 同时设置设计师电话
+        editForm.setFieldsValue({
+          designer_phone: record.designer_phone
+        });
+      } else if (dataIndex === 'surveyor') {
+        // 同时设置踏勘员电话
+        editForm.setFieldsValue({
+          surveyor_phone: record.surveyor_phone
+        });
+      }
+      
+      // 使用requestAnimationFrame确保在下一帧渲染
+      requestAnimationFrame(() => {
+        setEditingCell({ id: record.id, dataIndex });
+        
+        // 找到并聚焦到编辑元素
+        setTimeout(() => {
+          const editInput = document.querySelector('.customer-table .ant-table-cell-editing input, .customer-table .ant-table-cell-editing textarea, .customer-table .ant-table-cell-editing .ant-select');
+          if (editInput) {
+            (editInput as HTMLElement).focus();
+          }
+        }, 50);
       });
+    } else {
+      // 常规页面模式的编辑流程
+      setEditingCell({ id: record.id, dataIndex });
+      
+      // 如果是编辑施工队，预先设置施工队电话到表单
+      if (dataIndex === 'construction_team') {
+        const currentTeam = record.construction_team;
+        const currentPhone = record.construction_team_phone;
+        console.log('编辑施工队:', currentTeam, '当前电话:', currentPhone);
+        
+        // 用于防止电话覆盖
+        editForm.setFieldsValue({
+          construction_team: currentTeam,
+          construction_team_phone: currentPhone
+        });
+      }
+      
+      // 设置当前编辑字段的值到表单
+      editForm.setFieldsValue({
+        [dataIndex]: record[dataIndex as keyof Customer]
+      });
+      
+      // 针对特定字段的处理
+      if (dataIndex === 'salesman') {
+        // 同时设置业务员电话
+        editForm.setFieldsValue({
+          salesman_phone: record.salesman_phone
+        });
+      }
     }
   };
 
   // 取消编辑
   const cancel = () => {
     setEditingCell(null);
+    // 编辑结束时重置标记
+    editingRef.current = false;
   };
 
   /**
@@ -714,6 +662,31 @@ const CustomerList = () => {
         const newFilteredCustomers = [...filteredCustomers];
         newFilteredCustomers[filteredIndex] = { ...newFilteredCustomers[filteredIndex], ...updateData };
         setFilteredCustomers(newFilteredCustomers);
+      }
+      
+      // 在500条/页和1000条/页模式下，确保更新页面缓存
+      if (pageSize >= 500 && cachedPageData) {
+        // 更新页面缓存中的数据
+        const updatedCachedData = { ...cachedPageData };
+        
+        // 遍历所有缓存页查找并更新数据
+        Object.keys(updatedCachedData).forEach(pageKey => {
+          const page = parseInt(pageKey);
+          const pageData = updatedCachedData[page];
+          const cachedIndex = pageData.findIndex(customer => customer.id === id);
+          
+          if (cachedIndex > -1) {
+            // 更新缓存中的客户数据
+            pageData[cachedIndex] = { ...pageData[cachedIndex], ...updateData };
+            console.log(`已更新页面缓存 ${page} 中的客户数据`);
+          }
+        });
+        
+        // 保存更新后的缓存
+        setCachedPageData(updatedCachedData);
+        
+        // 强制重新渲染分页数据
+        setForceUpdate(prev => prev + 1);
       }
       
       // 退出编辑状态
@@ -1445,7 +1418,7 @@ const CustomerList = () => {
   }
 
   // 可编辑单元格组件
-  const EditableCell = ({ value, record, dataIndex, title, required = true }: { value: any; record: Customer; dataIndex: string; title: string; required?: boolean }) => {
+  const EditableCell = React.memo(({ value, record, dataIndex, title, required = true }: { value: any; record: Customer; dataIndex: string; title: string; required?: boolean }) => {
     const editable = isEditing(record, dataIndex);
     const [hover, setHover] = useState(false);
     
@@ -1489,17 +1462,30 @@ const CustomerList = () => {
             type="text" 
             size="small"
             icon={<EditOutlined />}
-            onClick={() => edit(record, dataIndex)}
+            onClick={(e) => {
+              e.stopPropagation();
+              edit(record, dataIndex);
+            }}
             style={{ padding: '0 4px' }}
             title={`编辑${title}`}
           />
         )}
       </div>
     );
-  };
+  }, (prevProps, nextProps) => {
+    // 仅在以下情况重新渲染:
+    // 1. 值变化
+    // 2. 编辑状态变化 (从查看切换到编辑，或者从编辑切换到查看)
+    const valueChanged = prevProps.value !== nextProps.value;
+    const wasEditing = isEditing(prevProps.record, prevProps.dataIndex);
+    const isEditingNow = isEditing(nextProps.record, nextProps.dataIndex);
+    const editingStateChanged = wasEditing !== isEditingNow;
+    
+    return !(valueChanged || editingStateChanged);
+  });
 
   // 添加可编辑下拉单元格组件
-  const EditableSelectCell = ({ value, record, dataIndex, title, options }: { 
+  const EditableSelectCell = React.memo(({ value, record, dataIndex, title, options }: { 
     value: any; 
     record: Customer; 
     dataIndex: string; 
@@ -1569,17 +1555,30 @@ const CustomerList = () => {
             type="text" 
             size="small"
             icon={<EditOutlined />}
-            onClick={() => edit(record, dataIndex)}
+            onClick={(e) => {
+              e.stopPropagation();
+              edit(record, dataIndex);
+            }}
             style={{ padding: '0 4px' }}
             title={`编辑${title}`}
           />
         )}
       </div>
     );
-  };
+  }, (prevProps, nextProps) => {
+    // 仅在以下情况重新渲染:
+    // 1. 值变化
+    // 2. 编辑状态变化
+    const valueChanged = prevProps.value !== nextProps.value;
+    const wasEditing = isEditing(prevProps.record, prevProps.dataIndex);
+    const isEditingNow = isEditing(nextProps.record, nextProps.dataIndex);
+    const editingStateChanged = wasEditing !== isEditingNow;
+    
+    return !(valueChanged || editingStateChanged);
+  });
 
   // 添加可编辑多选下拉单元格组件
-  const EditableMultipleSelectCell = ({ value, record, dataIndex, title, options }: { 
+  const EditableMultipleSelectCell = React.memo(({ value, record, dataIndex, title, options }: { 
     value: any; 
     record: Customer; 
     dataIndex: string; 
@@ -1712,17 +1711,30 @@ const CustomerList = () => {
             type="text" 
             size="small"
             icon={<EditOutlined />}
-            onClick={() => edit(record, dataIndex)}
+            onClick={(e) => {
+              e.stopPropagation();
+              edit(record, dataIndex);
+            }}
             style={{ padding: '0 4px' }}
             title={`编辑${title}`}
           />
         )}
       </div>
     );
-  };
+  }, (prevProps, nextProps) => {
+    // 仅在以下情况重新渲染:
+    // 1. 值变化
+    // 2. 编辑状态变化
+    const valueChanged = prevProps.value !== nextProps.value;
+    const wasEditing = isEditing(prevProps.record, prevProps.dataIndex);
+    const isEditingNow = isEditing(nextProps.record, nextProps.dataIndex);
+    const editingStateChanged = wasEditing !== isEditingNow;
+    
+    return !(valueChanged || editingStateChanged);
+  });
 
   // 可编辑日期单元格
-  const EditableDateCell = ({ value, record, dataIndex, title }: { 
+  const EditableDateCell = React.memo(({ value, record, dataIndex, title }: { 
     value: any; 
     record: Customer; 
     dataIndex: string; 
@@ -1793,7 +1805,17 @@ const CustomerList = () => {
         )}
       </div>
     );
-  };
+  }, (prevProps, nextProps) => {
+    // 仅在以下情况重新渲染:
+    // 1. 值变化
+    // 2. 编辑状态变化
+    const valueChanged = prevProps.value !== nextProps.value;
+    const wasEditing = isEditing(prevProps.record, prevProps.dataIndex);
+    const isEditingNow = isEditing(nextProps.record, nextProps.dataIndex);
+    const editingStateChanged = wasEditing !== isEditingNow;
+    
+    return !(valueChanged || editingStateChanged);
+  });
 
   // 表格列定义
   const columns: ColumnsType<Customer> = [
@@ -3037,7 +3059,10 @@ const CustomerList = () => {
             type="text" 
             size="small"
             icon={<EditOutlined />}
-            onClick={() => edit(record, 'construction_team_phone')}
+            onClick={(e) => {
+              e.stopPropagation();
+              edit(record, 'construction_team_phone');
+            }}
             style={{ padding: '0 4px' }}
             title="编辑施工队电话"
           />
@@ -3129,7 +3154,10 @@ const CustomerList = () => {
             type="text" 
             size="small"
             icon={<EditOutlined />}
-            onClick={() => edit(record, 'construction_team')}
+            onClick={(e) => {
+              e.stopPropagation();
+              edit(record, 'construction_team');
+            }}
             style={{ padding: '0 4px' }}
             title="编辑施工队"
           />
@@ -3673,7 +3701,10 @@ const CustomerList = () => {
             type="text" 
             size="small"
             icon={<EditOutlined />}
-            onClick={() => edit(record, 'surveyor')}
+            onClick={(e) => {
+              e.stopPropagation();
+              edit(record, 'surveyor');
+            }}
             style={{ padding: '0 4px' }}
             title="编辑踏勘员"
           />
@@ -3725,7 +3756,10 @@ const CustomerList = () => {
             type="text" 
             size="small"
             icon={<EditOutlined />}
-            onClick={() => edit(record, 'surveyor_phone')}
+            onClick={(e) => {
+              e.stopPropagation();
+              edit(record, 'surveyor_phone');
+            }}
             style={{ padding: '0 4px' }}
             title="编辑踏勘员电话"
           />
@@ -3779,84 +3813,147 @@ const CustomerList = () => {
   
   // 添加页面大小改变的处理函数
   const handlePageSizeChange = (size: number) => {
+    // 保存上一次的页面大小和当前数据用于快速渲染
+    setPreviousPageSize(pageSize);
+    const prevData = paginatedCustomers;
+    setPreRenderedData(prevData);
+    
+    // 更新页面大小和重置页码
     setPageSize(size);
-    setCurrentPage(1); // 重置到第一页
+    setCurrentPage(1);
+    
+    // 更新总页数
     setTotalPages(Math.ceil(filteredCustomers.length / size));
-    // 重置虚拟滚动状态
-    setVirtualPage(1);
-    setLoadedRecords(new Set());
+    
+    // 预填充页面缓存
+    populatePageCache(filteredCustomers, size);
+    
+    // 为大页面大小时启用虚拟滚动优化
+    if (size >= 500) {
+      // 在UI更新后重新计算虚拟滚动
+      setTimeout(() => {
+        const tableBody = document.querySelector('.ant-table-body');
+        if (tableBody) {
+          tableBody.scrollTop = 0;
+        }
+      }, 0);
+    }
   }
   
-  // 修改getVirtualCustomers函数，支持虚拟渲染
-  const getVirtualCustomers = () => {
-    // 基础分页逻辑 - 确定当前页的范围
+  // 修改为普通分页函数
+  const getPagedCustomers = () => {
+    // 尝试从缓存获取当前页数据
+    if (cachedPageData[currentPage]) {
+      return cachedPageData[currentPage];
+    }
+    
+    // 如果缓存中没有，则计算当前页的数据
     const pageStartIndex = (currentPage - 1) * pageSize;
     const pageEndIndex = Math.min(pageStartIndex + pageSize, filteredCustomers.length);
     
-    // 当页面大小大于等于500时，使用虚拟滚动
-    if (pageSize >= 500) {
-      // 获取表格可视区域的预估高度 - 65px是一个预估的行高
-      const tableBodyHeight = window.innerHeight - 200; // 估计表头等其他元素高度
-      const visibleRowsCount = Math.ceil(tableBodyHeight / 65); // 可见行数
-      
-      // 计算当前滚动位置
-      const scrollPosition = document.querySelector('.ant-table-body')?.scrollTop || 0;
-      const startRowIndex = Math.floor(scrollPosition / 65);
-      
-      // 计算虚拟窗口范围
-      const bufferSize = Math.ceil(visibleRowsCount / 2); // 上下缓冲区域
-      const virtualStartIndex = Math.max(pageStartIndex, pageStartIndex + Math.max(0, startRowIndex - bufferSize));
-      const virtualEndIndex = Math.min(pageEndIndex, virtualStartIndex + visibleRowsCount + 2 * bufferSize);
-      
-      // 返回虚拟窗口的数据
-      const visibleData = filteredCustomers.slice(virtualStartIndex, virtualEndIndex);
-      
-      // 添加占位元素确保滚动条高度正确
-      if (virtualStartIndex > pageStartIndex) {
-        // 在数组开头添加一个特殊的占位元素，带有正确的高度样式
-        visibleData.unshift({
-          id: 'top-spacer',
-          _isPlaceholder: true,
-          _height: (virtualStartIndex - pageStartIndex) * 65,
-        } as any);
-      }
-      
-      if (virtualEndIndex < pageEndIndex) {
-        // 在数组末尾添加一个特殊的占位元素
-        visibleData.push({
-          id: 'bottom-spacer',
-          _isPlaceholder: true,
-          _height: (pageEndIndex - virtualEndIndex) * 65,
-        } as any);
-      }
-      
-      return visibleData;
-    } else {
-      // 100条/页时使用普通分页，不需要虚拟滚动
-      return filteredCustomers.slice(pageStartIndex, pageEndIndex);
-    }
+    // 返回当前页的数据
+    return filteredCustomers.slice(pageStartIndex, pageEndIndex);
   };
 
-  // 优化的表格滚动事件处理函数
-  const handleTableScroll = (e) => {
-    if (pageSize >= 500) {
-      // 使用requestAnimationFrame以避免频繁更新
-      if (!window['scrollTimer']) {
-        window['scrollTimer'] = requestAnimationFrame(() => {
-          setVirtualScroll(prev => prev + 1); // 使用一个计数器触发重新渲染
-          window['scrollTimer'] = null;
-        });
-      }
+  // 虚拟滚动优化函数用于大数据量分页
+  const getVirtualCustomers = () => {
+    // 在分页小于500时，使用普通分页方式
+    if (pageSize < 500) {
+      return getPagedCustomers();
     }
+    
+    // 大页面模式下，首次加载可以直接使用预渲染数据
+    if (preRenderedData.length > 0 && pageSize !== previousPageSize) {
+      // 清除预渲染数据，只使用一次
+      setTimeout(() => setPreRenderedData([]), 0);
+      return preRenderedData;
+    }
+    
+    // 使用虚拟滚动方式 - 只渲染视口内的数据
+    const data = getPagedCustomers();
+    
+    // 如果数据量很小，不需要虚拟滚动
+    if (data.length <= VIRTUAL_PAGE_SIZE) {
+      return data;
+    }
+    
+    // 实现虚拟滚动：只返回可视区域的数据
+    // 获取表格容器和滚动位置
+    const tableBody = document.querySelector('.ant-table-body');
+    if (!tableBody) return data.slice(0, VIRTUAL_PAGE_SIZE); // 默认显示第一个虚拟页
+    
+    const scrollTop = tableBody.scrollTop;
+    const viewportHeight = tableBody.clientHeight;
+    // 假设每行高度为54px (可以根据实际情况调整)
+    const rowHeight = 54;
+    
+    // 计算应该从哪一行开始渲染
+    const startIndex = Math.floor(scrollTop / rowHeight);
+    // 计算可视区域可以容纳多少行
+    const visibleRows = Math.ceil(viewportHeight / rowHeight);
+    // 额外增加上下缓冲区，避免滚动时出现空白
+    const bufferRows = 20;
+    
+    // 计算最终的起止索引
+    const virtualStartIndex = Math.max(0, startIndex - bufferRows);
+    const virtualEndIndex = Math.min(data.length, startIndex + visibleRows + bufferRows);
+    
+    // 返回虚拟滚动的数据切片
+    return data.slice(virtualStartIndex, virtualEndIndex);
   };
-
-  // 添加虚拟滚动状态
-  const [virtualScroll, setVirtualScroll] = useState(0);
 
   // 更新计算当前页显示的数据函数
+  const [forceUpdate, setForceUpdate] = useState(0);
   const paginatedCustomers = useMemo(() => {
-    return getVirtualCustomers();
-  }, [filteredCustomers, currentPage, pageSize, virtualScroll]);
+    // 如果正在编辑，避免重新计算以提高性能
+    if (editingRef.current) {
+      return getPagedCustomers();
+    }
+    
+    // 大页面模式使用虚拟滚动
+    if (pageSize >= 500) {
+      return getVirtualCustomers();
+    }
+    
+    // 普通模式使用标准分页
+    return getPagedCustomers();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredCustomers, currentPage, pageSize, editingCell, preRenderedData, forceUpdate]);
+
+  // 监听表格滚动以支持虚拟滚动
+  useEffect(() => {
+    // 仅在大页面模式下启用
+    if (pageSize < 500) return;
+    
+    const handleScroll = () => {
+      // 如果正在编辑，不要触发重新渲染
+      if (editingRef.current) return;
+      
+      // 防抖处理滚动事件
+      if (window.scrollTimer) {
+        clearTimeout(window.scrollTimer);
+      }
+      
+      window.scrollTimer = setTimeout(() => {
+        // 手动触发重新渲染以更新虚拟列表
+        setFilteredCustomers([...filteredCustomers]);
+      }, 100);
+    };
+    
+    const tableBody = document.querySelector('.ant-table-body');
+    if (tableBody) {
+      tableBody.addEventListener('scroll', handleScroll);
+    }
+    
+    return () => {
+      if (tableBody) {
+        tableBody.removeEventListener('scroll', handleScroll);
+      }
+      if (window.scrollTimer) {
+        clearTimeout(window.scrollTimer);
+      }
+    };
+  }, [pageSize, filteredCustomers]);
 
   // 修改handleSearch函数，用于按钮点击和Enter键触发搜索
   const handleSearch = (value: string) => {
@@ -4276,7 +4373,10 @@ const CustomerList = () => {
             type="text" 
             size="small"
             icon={<EditOutlined />}
-            onClick={() => edit(record, 'designer')}
+            onClick={(e) => {
+              e.stopPropagation();
+              edit(record, 'designer');
+            }}
             style={{ padding: '0 4px' }}
             title="编辑设计师"
           />
@@ -4296,7 +4396,7 @@ const CustomerList = () => {
         style={{ margin: 0 }}
       >
         <Input 
-          placeholder="请输入设计师电话"
+          placeholder="设计师电话" 
           onPressEnter={() => record.id ? saveEditedCell(record.id) : undefined}
           onBlur={() => record.id ? saveEditedCell(record.id) : undefined}
         />
@@ -4327,7 +4427,10 @@ const CustomerList = () => {
             type="text" 
             size="small"
             icon={<EditOutlined />}
-            onClick={() => edit(record, 'designer_phone')}
+            onClick={(e) => {
+              e.stopPropagation();
+              edit(record, 'designer_phone');
+            }}
             style={{ padding: '0 4px' }}
             title="编辑设计师电话"
           />
@@ -4336,21 +4439,19 @@ const CustomerList = () => {
     );
   };
 
-  // 实现虚拟滚动的加载逻辑 - 修改为一次性加载所有数据
-  const loadMoreCustomers = () => {
-    // 直接加载所有数据，无需分批
-    setLoadedRecords(new Set(filteredCustomers.map(item => item.id || '')));
-    setVirtualPage(Math.ceil(filteredCustomers.length / VIRTUAL_PAGE_SIZE));
-  };
-
-  // 添加页面加载完成后的预加载函数
-  useEffect(() => {
-    // 当筛选后的客户数据已加载，预加载所有数据到缓存
-    if (filteredCustomers.length > 0 && !loading) {
-      console.log('页面加载完成，预加载所有数据到缓存...');
-      loadMoreCustomers();
+  // 预填充页面缓存
+  const populatePageCache = (data: Customer[], size: number) => {
+    const newCache: {[key: number]: Customer[]} = {};
+    
+    const pages = Math.ceil(data.length / size);
+    for (let page = 1; page <= pages; page++) {
+      const startIndex = (page - 1) * size;
+      const endIndex = Math.min(startIndex + size, data.length);
+      newCache[page] = data.slice(startIndex, endIndex);
     }
-  }, [filteredCustomers.length, loading]);
+    
+    setCachedPageData(newCache);
+  };
 
   return (
     <div className="customer-list-container" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -4359,153 +4460,39 @@ const CustomerList = () => {
       <Form form={editForm} style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ flex: 1, overflow: 'hidden' }}>
           <Table 
-            dataSource={paginatedCustomers} 
-            columns={columns} 
+            dataSource={paginatedCustomers}
+            columns={columns}
             rowKey="id"
             loading={loading}
-            scroll={{ x: 'max-content', y: 'calc(100vh - 160px)' }}
-            pagination={false}
-            sticky={{ offsetHeader: 0 }}
-            className="customer-table"
-            tableLayout="fixed"
-            size="middle"
+            size="small"
             bordered
-            onScroll={handleTableScroll}
-            components={pageSize >= 500 ? {
+            pagination={false}
+            // 为所有页面添加垂直滚动配置
+            scroll={{ y: 'calc(100vh - 280px)', x: 'max-content' }}
+            className="customer-table"
+            // 性能优化
+            virtual={pageSize >= 500}
+            components={{
               body: {
-                row: (props) => {
-                  // 处理占位行
-                  if (props.children && props.children[0] && 
-                      props.children[0].props && 
-                      props.children[0].props.record && 
-                      props.children[0].props.record._isPlaceholder) {
+                // 使用虚拟滚动时保持渲染的行不变
+                row: React.memo((props: any) => <tr {...props} />, 
+                  (prev, next) => {
+                    // 只在编辑状态变化或数据变化时重新渲染行
+                    const prevRecord = prev.children[0]?.props?.record;
+                    const nextRecord = next.children[0]?.props?.record;
+                    if (!prevRecord || !nextRecord) return false;
                     
-                    const height = props.children[0].props.record._height;
-                    return <tr style={{ height: `${height}px` }}><td colSpan={columns.length}></td></tr>;
+                    // 检查ID是否相同
+                    if (prevRecord.id !== nextRecord.id) return false;
+                    
+                    // 检查是否在编辑这一行
+                    const isEditingRow = editingCell && editingCell.id === prevRecord.id;
+                    const wasEditingRow = editingCell && editingCell.id === nextRecord.id;
+                    if (isEditingRow || wasEditingRow) return false;
+                    
+                    return true;
                   }
-                  return <tr {...props} />;
-                }
-              }
-            } : undefined}
-            onChange={(pagination, filters, sorter) => {
-              // 处理排序，确保所有客户都参与排序
-              if (sorter && !Array.isArray(sorter)) {
-                const { field, order } = sorter;
-                if (field && order) {
-                  // 使用Web Worker进行排序以避免阻塞UI线程
-                  if (window.Worker && filteredCustomers.length > 1000) {
-                    // 创建临时的排序Worker
-                    const workerBlob = new Blob([`
-                      self.onmessage = function(e) {
-                        const { data, field, order } = e.data;
-                        
-                        // 排序函数
-                        const sortFunc = (a, b) => {
-                          const aValue = a[field];
-                          const bValue = b[field];
-                          
-                          if (aValue === bValue) return 0;
-                          if (aValue === undefined || aValue === null) return order === 'ascend' ? -1 : 1;
-                          if (bValue === undefined || bValue === null) return order === 'ascend' ? 1 : -1;
-                          
-                          if (typeof aValue === 'string' && typeof bValue === 'string') {
-                            return order === 'ascend' 
-                              ? aValue.localeCompare(bValue) 
-                              : bValue.localeCompare(aValue);
-                          }
-                          
-                          if (typeof aValue === 'number' && typeof bValue === 'number') {
-                            return order === 'ascend' ? aValue - bValue : bValue - aValue;
-                          }
-                          
-                          return 0;
-                        };
-                        
-                        // 执行排序
-                        const sortedData = [...data].sort(sortFunc);
-                        
-                        // 返回排序结果
-                        self.postMessage(sortedData);
-                      };
-                    `], { type: 'application/javascript' });
-                    
-                    const workerUrl = URL.createObjectURL(workerBlob);
-                    const worker = new Worker(workerUrl);
-                    
-                    // 设置加载状态
-                    setLoading(true);
-                    
-                    // 监听排序结果
-                    worker.onmessage = function(e) {
-                      const sortedData = e.data;
-                      setFilteredCustomers(sortedData);
-                      // 重置分页和虚拟滚动状态
-                      setCurrentPage(1);
-                      setVirtualPage(1);
-                      setLoadedRecords(new Set());
-                      setLoading(false);
-                      
-                      // 释放资源
-                      worker.terminate();
-                      URL.revokeObjectURL(workerUrl);
-                    };
-                    
-                    // 发送数据到Worker进行排序
-                    worker.postMessage({
-                      data: filteredCustomers,
-                      field: field,
-                      order: order
-                    });
-                  } else {
-                    // 对于小数据集，使用常规排序
-                    const sortFunc = (a: Customer, b: Customer) => {
-                      // 为field创建类型安全的访问
-                      const fieldKey = field as keyof Customer;
-                      
-                      // 找到对应的列定义
-                      const column = columns.find(col => {
-                        if (typeof col.key === 'string' && col.key === field) return true;
-                        if ('dataIndex' in col && col.dataIndex === field) return true;
-                        return false;
-                      });
-                      
-                      // 如果列有自定义排序函数，使用它
-                      if (column && 'sorter' in column && typeof column.sorter === 'function') {
-                        const result = column.sorter(a, b);
-                        return order === 'ascend' ? result : -result;
-                      }
-                      
-                      // 否则使用默认排序逻辑
-                      const aValue = a[fieldKey];
-                      const bValue = b[fieldKey];
-                      
-                      if (aValue === bValue) return 0;
-                      if (aValue === undefined || aValue === null) return order === 'ascend' ? -1 : 1;
-                      if (bValue === undefined || bValue === null) return order === 'ascend' ? 1 : -1;
-                      
-                      if (typeof aValue === 'string' && typeof bValue === 'string') {
-                        return order === 'ascend' 
-                          ? aValue.localeCompare(bValue) 
-                          : bValue.localeCompare(aValue);
-                      }
-                      
-                      if (typeof aValue === 'number' && typeof bValue === 'number') {
-                        return order === 'ascend' ? aValue - bValue : bValue - aValue;
-                      }
-                      
-                      return 0;
-                    };
-                    
-                    // 排序数据
-                    const sortedData = [...filteredCustomers].sort(sortFunc);
-                    
-                    // 更新排序后的数据
-                    setFilteredCustomers(sortedData);
-                    setCurrentPage(1); // 重置到第一页
-                    setVirtualPage(1); // 重置虚拟滚动状态
-                    setLoadedRecords(new Set());
-                  }
-                }
+                )
               }
             }}
           />
