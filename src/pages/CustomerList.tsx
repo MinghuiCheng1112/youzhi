@@ -170,6 +170,47 @@ const CustomerList = () => {
       const data = await customerApi.getAll()
       console.log(`成功获取到 ${data.length} 条客户数据`);
       
+      // 先从客户数据中提取业务员信息
+      const salesmen = new Map<string, string>();
+      data.forEach(customer => {
+        if (customer.salesman && customer.salesman.trim() !== '') {
+          salesmen.set(customer.salesman, customer.salesman_phone || '');
+        }
+      });
+      
+      // 从user_roles表获取业务员信息
+      try {
+        const { data: salesmenData, error } = await supabase
+          .from('user_roles')
+          .select('name, phone, email, user_id')
+          .eq('role', 'salesman');
+        
+        if (error) throw error;
+        
+        // 将从user_roles表获取的业务员信息合并到映射中
+        if (salesmenData) {
+          salesmenData.forEach(salesman => {
+            if (salesman.name && salesman.name.trim() !== '') {
+              // 只有当salesmen中不存在此业务员或电话为空时才更新
+              if (!salesmen.has(salesman.name) || !salesmen.get(salesman.name)) {
+                salesmen.set(salesman.name, salesman.phone || '');
+              }
+            }
+          });
+        }
+      } catch (error) {
+        console.error('获取业务员信息失败:', error);
+      }
+      
+      // 转换为数组并更新业务员列表
+      const salesmenArray = Array.from(salesmen).map(([name, phone]) => ({
+        name,
+        phone
+      }));
+      
+      // 更新业务员列表
+      setSalesmenList(salesmenArray);
+      
       // 分批处理数据以避免UI卡顿
       const processData = (startIndex = 0, batchSize = MAX_RECORDS_PER_LOAD) => {
         const endIndex = Math.min(startIndex + batchSize, data.length);
@@ -1511,6 +1552,16 @@ const CustomerList = () => {
           showSearch
           optionFilterProp="label"
           options={options}
+          filterOption={(input, option) => 
+            (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+          }
+          style={{ width: '100%' }}
+          dropdownStyle={{ maxHeight: 400, overflow: 'auto' }}
+          dropdownMatchSelectWidth={false}
+          listHeight={256}
+          virtual={options.length > 30}
+          showArrow={true}
+          notFoundContent="无匹配结果"
           onBlur={() => record.id && saveEditedCell(record.id)}
           onSelect={(value) => {
             if (dataIndex === 'salesman') {

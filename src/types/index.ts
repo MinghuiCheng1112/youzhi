@@ -1,3 +1,4 @@
+
 // 更新出库状态类型定义
 export type OutboundStatus = 'none' | 'outbound' | 'inbound' | 'returned';
 
