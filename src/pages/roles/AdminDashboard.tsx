@@ -504,7 +504,6 @@ const AdminDashboard = () => {
                 colorField="name"
                 radius={0.8}
                 label={{
-                  type: 'outer',
                   content: ({name, percent}: {name: string, percent: number}) => `${name}: ${(percent * 100).toFixed(0)}%`,
                 }}
                 interactions={[
@@ -539,7 +538,6 @@ const AdminDashboard = () => {
                 colorField="name"
                 radius={0.8}
                 label={{
-                  type: 'outer',
                   content: ({name, percent}: {name: string, percent: number}) => `${name}: ${(percent * 100).toFixed(0)}%`,
                 }}
                 interactions={[

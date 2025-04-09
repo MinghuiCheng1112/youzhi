@@ -11,11 +11,13 @@ import {
   CalculatorOutlined,
   EditOutlined,
   DollarOutlined,
-  ToolOutlined
+  ToolOutlined,
+  DownloadOutlined
 } from '@ant-design/icons'
 import { customerApi } from '../../services/api'
 import { Customer } from '../../types'
 import dayjs from 'dayjs'
+import * as XLSX from 'xlsx'
 
 const { Title, Text } = Typography
 const { TabPane } = Tabs
@@ -36,6 +38,7 @@ const CARD_STYLE = {
 interface Material {
   id: string;
   name: string;
+  specs: string;
   perHousehold: number;
   price: number;
   editable?: boolean;
@@ -45,6 +48,7 @@ interface Material {
 interface CalculationResult {
   id: string;
   name: string;
+  specs: string;
   perHousehold: number;
   quantity: number;
   price: number;
@@ -53,21 +57,21 @@ interface CalculationResult {
 
 // 预定义的商品信息
 const DEFAULT_MATERIALS: Material[] = [
-  { id: '1', name: '方矩管100*100', perHousehold: 10, price: 180.11 },
-  { id: '2', name: '方矩管40*60', perHousehold: 40, price: 85.62 },
-  { id: '3', name: '方矩管50*100', perHousehold: 10, price: 133.54 },
-  { id: '4', name: '方矩管40*40', perHousehold: 6, price: 68.17 },
-  { id: '5', name: '角钢', perHousehold: 6, price: 46.84 },
-  { id: '6', name: '柱底钢板', perHousehold: 25, price: 9.95 },
-  { id: '7', name: '加劲板4.0', perHousehold: 40, price: 0.82 },
-  { id: '8', name: '膨胀螺栓M12*80', perHousehold: 100, price: 1.53 },
-  { id: '9', name: '80防水压块', perHousehold: 200, price: 1.43 },
-  { id: '10', name: '纵向小水槽', perHousehold: 45, price: 7.81 },
-  { id: '11', name: '纵向中水槽', perHousehold: 13, price: 31.54 },
-  { id: '12', name: '主水槽', perHousehold: 8, price: 57.05 },
-  { id: '13', name: '横向小水槽', perHousehold: 12, price: 31.84 },
-  { id: '14', name: '包边水槽', perHousehold: 15, price: 21.64 },
-  { id: '15', name: '屋脊水槽', perHousehold: 4, price: 35.82 },
+  { id: '1', name: '南飞锌镁铝方矩管ZM275', specs: '100*100*2.0', perHousehold: 10, price: 180.11 },
+  { id: '2', name: '南飞锌镁铝方矩管ZM275', specs: '40*60*2.0', perHousehold: 40, price: 85.62 },
+  { id: '3', name: '南飞锌镁铝方矩管ZM275', specs: '50*100*2.0', perHousehold: 10, price: 133.54 },
+  { id: '4', name: '南飞锌镁铝方矩管ZM275', specs: '40*40*2.0', perHousehold: 6, price: 68.17 },
+  { id: '5', name: '南飞锌镁铝角钢光伏支架ZM275', specs: '40*40*2.5', perHousehold: 6, price: 46.84 },
+  { id: '6', name: '南飞柱底钢板Q235B', specs: '200*200*6', perHousehold: 25, price: 9.95 },
+  { id: '7', name: '南飞柱底加劲板Q235B', specs: '45*100*4.0', perHousehold: 40, price: 0.82 },
+  { id: '8', name: '南飞不锈钢膨胀螺栓SUS304', specs: 'M12*80', perHousehold: 100, price: 1.53 },
+  { id: '9', name: '南飞U型80防水压块组合', specs: 'U型螺栓:M8*50*105mm\n配套螺母\n上压块带刺片:80*52*2.5mm\n下垫板:70*28*2.5mm', perHousehold: 200, price: 1.43 },
+  { id: '10', name: '南飞阳光房四级纵向小水槽', specs: '2360mm', perHousehold: 45, price: 7.81 },
+  { id: '11', name: '南飞阳光房四级纵向中水槽', specs: '4000mm', perHousehold: 13, price: 31.54 },
+  { id: '12', name: '南飞阳光房四级主水槽', specs: '4000mm', perHousehold: 8, price: 57.05 },
+  { id: '13', name: '南飞阳光房阳光房四级横向小水槽', specs: '适用60*40檩条', perHousehold: 12, price: 31.84 },
+  { id: '14', name: '南飞阳光房四级包边水槽', specs: '适用60*40檩条', perHousehold: 15, price: 21.64 },
+  { id: '15', name: '南飞阳光房四级屋脊水槽', specs: '适用60*40檩条', perHousehold: 4, price: 35.82 },
 ];
 
 const ProcurementDashboard = () => {
@@ -98,6 +102,7 @@ const ProcurementDashboard = () => {
       return {
         id: material.id,
         name: material.name,
+        specs: material.specs,
         perHousehold: material.perHousehold,
         quantity,
         price: material.price,
@@ -162,16 +167,27 @@ const ProcurementDashboard = () => {
       render: (text: string) => <Tag color="blue">{text}</Tag>
     },
     {
-      title: '商品名称',
+      title: '货位名称',
       dataIndex: 'name',
       key: 'name',
       render: (text: string) => <Text strong>{text}</Text>
     },
     {
+      title: '规格型号',
+      dataIndex: 'specs',
+      key: 'specs',
+      width: 200,
+      render: (text: string) => (
+        <Text type="secondary" style={{ whiteSpace: 'pre-wrap' }}>
+          {text}
+        </Text>
+      )
+    },
+    {
       title: '每户用料',
       dataIndex: 'perHousehold',
       key: 'perHousehold',
-      width: 150,
+      width: 120,
       align: 'center' as const,
       render: (text: number, record: Material) => {
         const isEditing = record.id === editingId && editingField === 'perHousehold'
@@ -207,10 +223,10 @@ const ProcurementDashboard = () => {
       },
     },
     {
-      title: '单价 (元)',
+      title: '单价',
       dataIndex: 'price',
       key: 'price',
-      width: 150,
+      width: 120,
       align: 'center' as const,
       render: (text: number, record: Material) => {
         const isEditing = record.id === editingId && editingField === 'price'
@@ -233,7 +249,7 @@ const ProcurementDashboard = () => {
           </Form>
         ) : (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text type="danger">¥ {text.toFixed(2)}</Text>
+            <Text type="danger">{text.toFixed(2)}</Text>
             <Button 
               type="link" 
               icon={<EditOutlined />} 
@@ -250,10 +266,21 @@ const ProcurementDashboard = () => {
   // 计算结果表格列定义
   const calculationColumns = [
     {
-      title: '商品名称',
+      title: '货位名称',
       dataIndex: 'name',
       key: 'name',
       render: (text: string) => <Text strong>{text}</Text>
+    },
+    {
+      title: '规格型号',
+      dataIndex: 'specs',
+      key: 'specs',
+      width: 200,
+      render: (text: string) => (
+        <Text type="secondary" style={{ whiteSpace: 'pre-wrap' }}>
+          {text}
+        </Text>
+      )
     },
     {
       title: '每户用料',
@@ -272,22 +299,93 @@ const ProcurementDashboard = () => {
       render: (text: number) => <Tag color="purple">{text}</Tag>
     },
     {
-      title: '单价 (元)',
+      title: '单价',
       dataIndex: 'price',
       key: 'price',
-      width: 120,
+      width: 100,
       align: 'right' as const,
-      render: (text: number) => <Text type="secondary">¥ {text.toFixed(2)}</Text>,
+      render: (text: number) => <Text type="secondary">{text.toFixed(2)}</Text>,
     },
     {
-      title: '总价 (元)',
+      title: '总价',
       dataIndex: 'totalPrice',
       key: 'totalPrice',
-      width: 130,
+      width: 120,
       align: 'right' as const,
-      render: (text: number) => <Text type="danger" strong>¥ {text.toFixed(2)}</Text>,
+      render: (text: number) => <Text type="danger" strong>{text.toFixed(2)}</Text>,
     }
   ]
+
+  // 添加导出Excel功能
+  const exportToExcel = () => {
+    try {
+      // 如果没有计算结果，则创建空的数据集
+      if (calculationResults.length === 0) {
+        message.info('暂无计算结果数据');
+        return;
+      }
+
+      // 准备导出数据
+      const exportData = calculationResults.map(item => ({
+        '货位名称': item.name,
+        '规格型号': item.specs.replace(/\n/g, ' '), // 将换行替换为空格
+        '每户用料': item.perHousehold,
+        '总用料': item.quantity,
+        '单价': item.price,
+        '总价': item.totalPrice
+      }));
+
+      // 添加总计行
+      exportData.push({
+        '货位名称': '总计',
+        '规格型号': '',
+        '每户用料': null,
+        '总用料': null,
+        '单价': null,
+        '总价': totalAmount
+      });
+
+      // 添加吨数行
+      exportData.push({
+        '货位名称': '吨数 (总价/5055)',
+        '规格型号': '',
+        '每户用料': null,
+        '总用料': null,
+        '单价': null,
+        '总价': tonnage
+      });
+
+      // 格式化数据的显示方式
+      const workbookOptions = { bookType: 'xlsx', bookSST: false, type: 'binary' };
+      
+      // 创建工作表
+      const worksheet = XLSX.utils.json_to_sheet(exportData);
+      
+      // 设置列宽
+      const colWidths = [
+        { wch: 25 }, // 货位名称
+        { wch: 30 }, // 规格型号
+        { wch: 10 }, // 每户用料
+        { wch: 10 }, // 总用料
+        { wch: 10 }, // 单价
+        { wch: 15 }  // 总价
+      ];
+      worksheet['!cols'] = colWidths;
+
+      // 创建工作簿
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, '用料计算');
+
+      // 生成Excel文件并下载
+      const excelFileName = `采购计算表_${dayjs().format('YYYY-MM-DD')}.xlsx`;
+      XLSX.writeFile(workbook, excelFileName);
+
+      message.success('导出成功');
+    } catch (error) {
+      console.error('导出失败:', error);
+      message.error('导出失败');
+    }
+  };
 
   return (
     <div className="procurement-dashboard">
@@ -306,14 +404,14 @@ const ProcurementDashboard = () => {
         className="custom-tabs"
       >
         <TabPane 
-          tab={<span><ToolOutlined /> 商品信息管理</span>} 
+          tab={<span><ToolOutlined /> 采购材料表</span>} 
           key="1"
         >
           <Card 
             title={
               <div style={{ display: 'flex', alignItems: 'center' }}>
                 <InboxOutlined style={{ marginRight: 8, color: '#1890ff' }} />
-                <span>商品信息/每户用料/单价</span>
+                <span>采购材料表</span>
               </div>
             }
             style={{ 
@@ -354,6 +452,15 @@ const ProcurementDashboard = () => {
               borderRadius: '8px',
               marginBottom: 16
             }}
+            extra={
+              <Button 
+                type="primary" 
+                icon={<DownloadOutlined />} 
+                onClick={exportToExcel}
+              >
+                导出Excel
+              </Button>
+            }
           >
             <Row gutter={[24, 24]}>
               <Col xs={24} sm={12} md={8} lg={6}>
@@ -488,6 +595,46 @@ const ProcurementDashboard = () => {
          }
          .summary-row td {
            padding: 16px !important;
+         }
+         /* 修复滚动条样式 */
+         .ant-table-body {
+           overflow-y: auto !important;
+           overflow-x: hidden !important;
+           max-height: 500px !important;
+         }
+         .ant-table-body::-webkit-scrollbar {
+           width: 8px;
+           background-color: #f1f1f1;
+         }
+         .ant-table-body::-webkit-scrollbar-thumb {
+           background-color: #bfbfbf;
+           border-radius: 4px;
+         }
+         .ant-table-body::-webkit-scrollbar-track {
+           background-color: #f1f1f1;
+         }
+         .ant-table-body::-webkit-scrollbar-button {
+           display: block;
+           height: 8px;
+           background-color: #bfbfbf;
+         }
+         .ant-table-body::-webkit-scrollbar-button:start:decrement,
+         .ant-table-body::-webkit-scrollbar-button:end:increment {
+           display: block;
+           height: 8px;
+           background-color: #f1f1f1;
+           background-repeat: no-repeat;
+           background-position: center center;
+         }
+         .ant-table-body::-webkit-scrollbar-button:start:decrement {
+           background-image: linear-gradient(to top, #bfbfbf 50%, transparent 50%);
+           border-top-left-radius: 2px;
+           border-top-right-radius: 2px;
+         }
+         .ant-table-body::-webkit-scrollbar-button:end:increment {
+           background-image: linear-gradient(to bottom, #bfbfbf 50%, transparent 50%);
+           border-bottom-left-radius: 2px;
+           border-bottom-right-radius: 2px;
          }
         `}
       </style>
