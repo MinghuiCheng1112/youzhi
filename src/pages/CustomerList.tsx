@@ -12,7 +12,8 @@ import {
   CloseCircleOutlined,
   CheckCircleOutlined,
   RollbackOutlined,
-  DownOutlined
+  DownOutlined,
+  LoadingOutlined
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { customerApi, constructionTeamApi, surveyorApi, dataCacheService } from '../services/api'
@@ -70,7 +71,36 @@ const CustomerList = () => {
   const [preRenderedData, setPreRenderedData] = useState<Customer[]>([])
   // 用于控制编辑时的性能优化
   const editingRef = useRef<boolean>(false)
-
+  
+  // 添加高级搜索相关状态
+  const [advancedSearchVisible, setAdvancedSearchVisible] = useState(false)
+  const [searchFields, setSearchFields] = useState<{[key: string]: boolean}>({
+    customer_name: true,
+    phone: true,
+    address: true,
+    salesman: true,
+    id_card: true,
+    meter_number: true,
+    designer: true,
+    surveyor: true,
+    construction_team: true,
+    remarks: false,
+  })
+  
+  // 高级搜索字段名称映射
+  const fieldNameMap: {[key: string]: string} = {
+    customer_name: '客户姓名',
+    phone: '客户电话',
+    address: '客户地址',
+    salesman: '业务员',
+    id_card: '身份证号',
+    meter_number: '电表号码',
+    designer: '设计师',
+    surveyor: '踏勘员',
+    construction_team: '施工队',
+    remarks: '备注',
+  }
+  
   // 限制每次最大加载记录数以提高性能
   const MAX_RECORDS_PER_LOAD = 500; // 恢复合理的数据量限制
   // 添加虚拟滚动页大小常量
@@ -359,24 +389,24 @@ const CustomerList = () => {
       .split(/[\s,，]+/) // 按空格或中英文逗号分隔
       .filter(keyword => keyword.trim() !== ''); // 过滤掉空字符串
     
+    // 获取启用的搜索字段
+    const enabledFields = Object.entries(searchFields)
+      .filter(([_, enabled]) => enabled)
+      .map(([field]) => field);
+    
+    // 如果没有启用任何字段，使用默认字段
+    if (enabledFields.length === 0) {
+      enabledFields.push('customer_name', 'phone', 'address', 'salesman', 'id_card', 'meter_number');
+    }
+    
     // 直接过滤所有数据，不再分批处理
     const filtered = customers.filter(customer => {
-      // 只检查最重要的几个字段，减少遍历次数
-      const name = (customer.customer_name || '').toLowerCase();
-      const phone = (customer.phone || '').toLowerCase();
-      const address = (customer.address || '').toLowerCase();
-      const salesman = (customer.salesman || '').toLowerCase();
-      const idCard = (customer.id_card || '').toLowerCase();
-      const meterNumber = (customer.meter_number || '').toLowerCase();
-      
-      // 对每个关键词进行检查，只要有一个关键词匹配任何字段就返回true
+      // 检查启用的每个字段
       return keywords.some(keyword => 
-        name.includes(keyword) || 
-        phone.includes(keyword) || 
-        address.includes(keyword) || 
-        salesman.includes(keyword) ||
-        idCard.includes(keyword) ||
-        meterNumber.includes(keyword)
+        enabledFields.some(field => {
+          const fieldValue = (customer[field as keyof Customer] || '').toString().toLowerCase();
+          return fieldValue.includes(keyword);
+        })
       );
     });
     
@@ -3647,21 +3677,41 @@ const CustomerList = () => {
       </Space>
       <Space>
         <Input
-          placeholder="搜索客户名称/电话/地址 (多关键词用空格或逗号分隔)"
+          placeholder="搜索 (多关键词用空格或逗号分隔)"
           value={searchText}
           onChange={handleInputChange}
           onPressEnter={(e) => handleSearch(searchText)}
           style={{ width: 250 }}
           prefix={<SearchOutlined />}
+          suffix={isSearching ? <LoadingOutlined /> : null}
           allowClear
         />
-        <Button 
-          type="primary" 
-          icon={<SearchOutlined />} 
-          onClick={() => handleSearch(searchText)}
+        <Dropdown
+          overlay={
+            <Menu
+              items={[
+                {
+                  key: "search",
+                  icon: <SearchOutlined />,
+                  label: "快速搜索",
+                  onClick: () => handleSearch(searchText)
+                },
+                {
+                  key: "advanced",
+                  icon: <SearchOutlined />,
+                  label: "高级搜索",
+                  onClick: showAdvancedSearch
+                }
+              ]}
+            />
+          }
+          placement="bottomRight"
+          trigger={['click']}
         >
-          搜索
-        </Button>
+          <Button type="primary" icon={<SearchOutlined />} loading={isSearching}>
+            搜索 <DownOutlined />
+          </Button>
+        </Dropdown>
         <Button 
           type="primary" 
           icon={<PlusOutlined />} 
@@ -3671,19 +3721,19 @@ const CustomerList = () => {
         </Button>
         <Button 
           type="default" 
-            icon={<ImportOutlined />} 
+          icon={<ImportOutlined />} 
           onClick={() => navigate('/customers/import')}
-          >
-            导入客户
-          </Button>
-          <Button 
-            icon={<ExportOutlined />} 
-            onClick={showExportModal}
-          >
+        >
+          导入客户
+        </Button>
+        <Button 
+          icon={<ExportOutlined />} 
+          onClick={showExportModal}
+        >
           导出数据
-          </Button>
-        </Space>
-      </div>
+        </Button>
+      </Space>
+    </div>
   )
 
   // 添加一个专门用于踏勘员的可编辑单元格
@@ -4007,41 +4057,49 @@ const CustomerList = () => {
   }, [pageSize, filteredCustomers]);
 
   // 修改handleSearch函数，用于按钮点击和Enter键触发搜索
-  const handleSearch = (value: string) => {
+  const handleSearch = useCallback((value: string) => {
+    setIsSearching(true); // 设置搜索中状态
     setCurrentPage(1); // 搜索时重置到第一页
-    performSearch(value);
     
-    // 在这里显示未找到匹配的提示，因为这是用户主动触发的搜索
-    if (value.trim().length > 0) {
-      // 支持空格或逗号分隔的多关键词搜索
-      const keywords = value.toLowerCase()
-        .split(/[\s,，]+/) // 按空格或中英文逗号分隔
-        .filter(keyword => keyword.trim() !== ''); // 过滤掉空字符串
+    // 使用requestAnimationFrame延迟搜索执行，减少UI阻塞
+    requestAnimationFrame(() => {
+      performSearch(value);
       
-      const filtered = customers.filter(customer => {
-        const name = (customer.customer_name || '').toLowerCase();
-        const phone = (customer.phone || '').toLowerCase();
-        const address = (customer.address || '').toLowerCase();
-        const salesman = (customer.salesman || '').toLowerCase();
-        const idCard = (customer.id_card || '').toLowerCase();
-        const meterNumber = (customer.meter_number || '').toLowerCase();
+      // 在这里显示未找到匹配的提示，因为这是用户主动触发的搜索
+      if (value.trim().length > 0) {
+        // 支持空格或逗号分隔的多关键词搜索
+        const keywords = value.toLowerCase()
+          .split(/[\s,，]+/) // 按空格或中英文逗号分隔
+          .filter(keyword => keyword.trim() !== ''); // 过滤掉空字符串
         
-        // 对每个关键词进行检查，只要有一个关键词匹配任何字段就返回true
-        return keywords.some(keyword => 
-          name.includes(keyword) || 
-          phone.includes(keyword) || 
-          address.includes(keyword) || 
-          salesman.includes(keyword) ||
-          idCard.includes(keyword) ||
-          meterNumber.includes(keyword)
-        );
-      });
-      
-      if (filtered.length === 0 && customers.length > 0) {
-        message.info(`未找到匹配"${value}"的客户记录`);
+        const filtered = customers.filter(customer => {
+          // 获取启用的搜索字段
+          const enabledFields = Object.entries(searchFields)
+            .filter(([_, enabled]) => enabled)
+            .map(([field]) => field);
+          
+          // 如果没有启用任何字段，使用默认字段
+          if (enabledFields.length === 0) {
+            enabledFields.push('customer_name', 'phone', 'address', 'salesman', 'id_card', 'meter_number');
+          }
+          
+          // 检查启用的每个字段
+          return keywords.some(keyword => 
+            enabledFields.some(field => {
+              const fieldValue = (customer[field as keyof Customer] || '').toString().toLowerCase();
+              return fieldValue.includes(keyword);
+            })
+          );
+        });
+        
+        if (filtered.length === 0 && customers.length > 0) {
+          message.info(`未找到匹配"${value}"的客户记录`);
+        }
       }
-    }
-  };
+      
+      setIsSearching(false); // 搜索完成
+    });
+  }, [customers, performSearch, searchFields]);
 
   // 处理首次联系状态变更
   const handleFirstContactChange = async (id: string | undefined) => {
@@ -4504,6 +4562,99 @@ const CustomerList = () => {
     setCachedPageData(newCache);
   };
 
+  // 使用useCallback优化setSearchFields，避免不必要的重新渲染
+  const handleSearchFieldsChange = useCallback((newFields: {[key: string]: boolean}) => {
+    setSearchFields(newFields);
+  }, []);
+  
+  // 使用useCallback优化showAdvancedSearch函数
+  const showAdvancedSearch = useCallback(() => {
+    setAdvancedSearchVisible(true);
+  }, []);
+  
+  // 处理高级搜索确认
+  const handleAdvancedSearchConfirm = useCallback(() => {
+    setAdvancedSearchVisible(false);
+    // 执行搜索
+    performSearch(searchText);
+  }, [searchText]);
+  
+  // 优化后的高级搜索模态框组件
+  const AdvancedSearchModal = () => {
+    // 使用本地状态，不会触发父组件重新渲染
+    const [localFields, setLocalFields] = useState<{[key: string]: boolean}>(() => ({...searchFields}));
+    
+    // 使用useEffect同步searchFields到localFields，仅在Modal打开时
+    useEffect(() => {
+      if (advancedSearchVisible) {
+        setLocalFields({...searchFields});
+      }
+    }, [advancedSearchVisible]);
+    
+    // 单个字段状态变更，只更新本地状态
+    const handleFieldChange = (field: string, checked: boolean) => {
+      setLocalFields(prev => ({...prev, [field]: checked}));
+    };
+    
+    // 计算选中的字段数
+    const selectedCount = Object.values(localFields).filter(Boolean).length;
+    
+    // 确认按钮处理函数
+    const onOk = () => {
+      // 仅在确认时更新父组件状态，避免中间状态引起不必要的渲染
+      setSearchFields(localFields);
+      setAdvancedSearchVisible(false);
+      // 执行搜索
+      performSearch(searchText);
+    };
+    
+    // 取消按钮处理函数
+    const onCancel = () => {
+      setAdvancedSearchVisible(false);
+    };
+    
+    return (
+      <Modal
+        title="高级搜索设置"
+        open={advancedSearchVisible}
+        onOk={onOk}
+        onCancel={onCancel}
+        okText="确认"
+        cancelText="取消"
+        destroyOnClose={true}
+        styles={{
+          body: { 
+            padding: '16px 24px', 
+            maxHeight: 'calc(100vh - 300px)', 
+            overflow: 'auto'
+          }
+        }}
+      >
+        <div>
+          <p>请选择要搜索的字段：</p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+            {Object.entries(fieldNameMap).map(([field, name]) => (
+              <Checkbox
+                key={field}
+                checked={!!localFields[field]}
+                onChange={(e) => handleFieldChange(field, e.target.checked)}
+              >
+                {name}
+              </Checkbox>
+            ))}
+          </div>
+          <div style={{ marginTop: 16 }}>
+            <p>当前搜索内容：{searchText || '(无)'}</p>
+            <p>当前将在{selectedCount}个字段中进行搜索</p>
+          </div>
+        </div>
+      </Modal>
+    );
+  };
+
+  // 在组件顶部添加搜索状态
+  const [isSearching, setIsSearching] = useState(false);
+
   return (
     <div className="customer-list-container" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {renderTitleBar()}
@@ -4852,6 +5003,9 @@ const CustomerList = () => {
           </Row>
         </div>
       </Modal>
+      
+      {/* 使用新的高级搜索模态框 */}
+      <AdvancedSearchModal />
     </div>
   )
 }
