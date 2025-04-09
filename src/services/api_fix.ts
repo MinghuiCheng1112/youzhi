@@ -6,7 +6,7 @@
  */
 
 import { customerApi } from './api';
-import { supabase } from './supabase';
+import { supabase } from './supabaseClient';
 
 /**
  * 安全更新建设验收状态
@@ -38,6 +38,38 @@ export async function updateConstructionAcceptance(id: string, isAccepted: boole
       // 最后尝试直接SQL方法
       return await updateConstructionAcceptanceDirectSQL(id, isAccepted);
     }
+  }
+}
+
+/**
+ * 安全更新挂表日期状态
+ * 只传递meter_installation_date字段
+ */
+export async function updateMeterInstallationDate(id: string, isInstalled: boolean) {
+  console.log('[API修复] 安全更新挂表日期，参数:', { id, isInstalled });
+  
+  try {
+    // 确保只发送一个字段
+    const updateData = {
+      meter_installation_date: isInstalled ? new Date().toISOString() : null
+    };
+    
+    // 使用直接SQL更新，避免触发其他字段的变更
+    const { data, error } = await supabase.from('customers')
+      .update(updateData)
+      .eq('id', id)
+      .select('id, customer_name, meter_installation_date');
+      
+    if (error) {
+      console.error('[API修复] 挂表日期更新失败:', error);
+      throw error;
+    }
+    
+    console.log('[API修复] 挂表日期更新成功:', data);
+    return data;
+  } catch (error) {
+    console.error('[API修复] 挂表日期更新错误:', error);
+    throw error;
   }
 }
 

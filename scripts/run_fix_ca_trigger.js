@@ -25,7 +25,7 @@ async function runFixScript() {
     console.log('[信息] 执行SQL脚本...');
     
     // 执行SQL脚本
-    const { data, error } = await supabase.rpc('exec_sql_query', { sql_query: sqlScript });
+    const { data, error } = await supabase.rpc('exec_sql', { sql_query: sqlScript });
     
     if (error) {
       console.error('[错误] SQL执行失败:', error);

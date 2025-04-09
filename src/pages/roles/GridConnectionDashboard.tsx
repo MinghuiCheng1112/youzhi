@@ -14,9 +14,10 @@ import {
   DashboardOutlined
 } from '@ant-design/icons'
 import { customerApi } from '../../services/api'
-import { updateConstructionAcceptance } from '../../services/api_fix'
+import { updateConstructionAcceptance, updateMeterInstallationDate } from '../../services/api_fix'
 import dayjs from 'dayjs'
 import * as XLSX from 'xlsx'
+import { supabase } from '../../services/supabase'
 
 const { Search } = Input
 const { Title, Text } = Typography
@@ -277,7 +278,7 @@ const GridConnectionDashboard = () => {
         <Tag color="green" style={{ cursor: 'pointer' }} onClick={() => handleMeterInstallationDateChange(record.id, text)}>
           <NodeIndexOutlined /> {dayjs(text).format('YYYY-MM-DD')}
         </Tag> : 
-        <Tag color="orange" style={{ cursor: 'pointer' }} onClick={() => handleMeterInstallationDateChange(record.id, text)}>
+        <Tag color="orange" style={{ cursor: 'pointer' }} onClick={() => handleMeterInstallationDateChange(record.id, null)}>
           <ClockCircleOutlined /> 未挂表
         </Tag>,
     },
@@ -326,20 +327,24 @@ const GridConnectionDashboard = () => {
     
     try {
       setLoading(true);
+      console.log(`[挂表日期] 更新客户(${id})的挂表日期状态，当前状态:`, currentStatus ? '已挂表' : '未挂表');
       
-      // 如果当前有状态（已挂表），则恢复为未挂表
-      // 如果当前没有状态（未挂表），则标记为已挂表
-      const updateObj = {
-        meter_installation_date: currentStatus ? null : new Date().toISOString()
-      };
-      
-      await customerApi.update(id, updateObj);
+      // 使用安全的API方法，只传递必要的字段
+      const isInstalled = !currentStatus; // 当前没有日期，需要设为已挂表
+      await updateMeterInstallationDate(id, isInstalled);
       
       message.success(currentStatus ? '已恢复为未挂表状态' : '已标记为已挂表状态');
-      fetchCustomers(); // 刷新数据
+      
+      // 刷新数据
+      fetchCustomers();
     } catch (error) {
-      console.error('更新挂表日期状态失败:', error);
-      message.error('操作失败，请重试');
+      console.error('[挂表日期] 操作过程出错:', error);
+      
+      if (error instanceof Error) {
+        message.error(`更新失败: ${error.message}`);
+      } else {
+        message.error('操作失败，请重试');
+      }
     } finally {
       setLoading(false);
     }
