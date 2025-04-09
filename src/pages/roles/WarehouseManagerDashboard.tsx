@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { Table, Card, Input, Button, Typography, Space, message, Tag, Modal, Form, DatePicker, Statistic, Row, Col, Tooltip, Divider, Progress } from 'antd'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { Table, Card, Input, Button, Typography, Space, message, Tag, Modal, Form, DatePicker, Statistic, Row, Col, Tooltip, Divider, Progress, BackTop } from 'antd'
 import { 
   SearchOutlined,
   ReloadOutlined,
@@ -7,7 +7,8 @@ import {
   DeleteOutlined,
   CloseCircleOutlined,
   RollbackOutlined,
-  ClockCircleOutlined
+  ClockCircleOutlined,
+  UpOutlined
 } from '@ant-design/icons'
 import { customerApi, dataCacheService } from '../../services/api'
 import { Customer } from '../../types'
@@ -73,8 +74,8 @@ const WarehouseManagerDashboard = () => {
   // 添加搜索加载状态
   const [searchLoading, setSearchLoading] = useState(false);
   
-  // 添加显示的结果数量上限
-  const [displayLimit, setDisplayLimit] = useState(100);
+  // 创建记忆化的搜索数据
+  const memoizedCustomers = useMemo(() => customers, [customers]);
   
   // 使用useCallback封装搜索逻辑
   const handleSearch = useCallback((value: string) => {
@@ -88,126 +89,109 @@ const WarehouseManagerDashboard = () => {
     
     // 空字符串直接返回所有数据，无需过滤
     if (!value.trim()) {
-      setFilteredCustomers(customers);
+      setFilteredCustomers(memoizedCustomers);
       return;
     }
     
     // 显示搜索加载状态
     setSearchLoading(true);
     
-    // 设置新的定时器
+    // 设置新的定时器 - 增加到800ms减少触发频率
     debounceTimer.current = setTimeout(() => {
       const lowercasedFilter = value.toLowerCase();
       
       // 性能监控 - 开始过滤
       console.time('搜索过滤');
       
-      // 是否使用Web Worker（大数据集才使用）
-      if (window.Worker && customers.length > 1000) {
+      // 优先使用Web Worker进行搜索，降低阈值到500
+      if (window.Worker && memoizedCustomers.length > 500) {
         // 创建一次性的Worker进行搜索
         const workerCode = `
           self.onmessage = function(e) {
             const { customers, searchText } = e.data;
             const lowercasedFilter = searchText.toLowerCase();
             
+            // 优化搜索逻辑，使用更高效的查找方式
             const filtered = customers.filter(item => {
-              return (
-                (item.customer_name && item.customer_name.toLowerCase().includes(lowercasedFilter)) ||
-                (item.phone && item.phone.toLowerCase().includes(lowercasedFilter)) ||
-                (item.address && item.address.toLowerCase().includes(lowercasedFilter)) ||
-                (item.salesman && item.salesman.toLowerCase().includes(lowercasedFilter)) ||
-                (item.construction_team && item.construction_team.toLowerCase().includes(lowercasedFilter))
-              );
+              // 预先计算所有匹配字段
+              const nameMatch = item.customer_name ? item.customer_name.toLowerCase().indexOf(lowercasedFilter) !== -1 : false;
+              const phoneMatch = item.phone ? item.phone.toLowerCase().indexOf(lowercasedFilter) !== -1 : false;
+              const addressMatch = item.address ? item.address.toLowerCase().indexOf(lowercasedFilter) !== -1 : false;
+              const salesmanMatch = item.salesman ? item.salesman.toLowerCase().indexOf(lowercasedFilter) !== -1 : false;
+              const teamMatch = item.construction_team ? item.construction_team.toLowerCase().indexOf(lowercasedFilter) !== -1 : false;
+              
+              // 一次性检查所有字段
+              return nameMatch || phoneMatch || addressMatch || salesmanMatch || teamMatch;
             });
             
             self.postMessage(filtered);
           };
         `;
         
-        // 创建Blob和Worker
-        const blob = new Blob([workerCode], { type: 'application/javascript' });
-        const workerUrl = URL.createObjectURL(blob);
-        const worker = new Worker(workerUrl);
-        
-        // 接收搜索结果
-        worker.onmessage = function(e) {
-          const results = e.data;
+        try {
+          // 创建Blob和Worker
+          const blob = new Blob([workerCode], { type: 'application/javascript' });
+          const workerUrl = URL.createObjectURL(blob);
+          const worker = new Worker(workerUrl);
           
-          // 如果结果很多，先只显示部分，避免界面卡顿
-          if (results.length > 100) {
-            // 先显示前100条
-            setFilteredCustomers(results.slice(0, 100));
-            setDisplayLimit(100);
+          // 接收搜索结果
+          worker.onmessage = function(e) {
+            const results = e.data;
             
-            // 在下一帧显示所有结果
-            requestAnimationFrame(() => {
-              setFilteredCustomers(results);
-              setDisplayLimit(results.length);
-            });
-          } else {
+            // 显示所有结果
             setFilteredCustomers(results);
-            setDisplayLimit(results.length);
-          }
+            setSearchLoading(false);
+            
+            // 释放资源
+            worker.terminate();
+            URL.revokeObjectURL(workerUrl);
+            
+            // 性能监控 - 结束过滤（Web Worker）
+            console.timeEnd('搜索过滤');
+          };
           
-          setSearchLoading(false);
-          
-          // 释放资源
-          worker.terminate();
-          URL.revokeObjectURL(workerUrl);
-          
-          // 性能监控 - 结束过滤（Web Worker）
-          console.timeEnd('搜索过滤');
-        };
-        
-        // 发送数据进行搜索
-        worker.postMessage({
-          customers: customers,
-          searchText: value
-        });
-      } else {
-        // 常规搜索处理（小数据集）
-        // 优化搜索逻辑：跳过空值检查，减少重复判断
-        const filtered = customers.filter(item => {
-          // 只有在字段有值时才进行搜索比较，避免无效操作
-          const nameMatch = item.customer_name ? item.customer_name.toLowerCase().includes(lowercasedFilter) : false;
-          if (nameMatch) return true; // 提前返回，减少后续比较
-          
-          const phoneMatch = item.phone ? item.phone.toLowerCase().includes(lowercasedFilter) : false;
-          if (phoneMatch) return true;
-          
-          const addressMatch = item.address ? item.address.toLowerCase().includes(lowercasedFilter) : false;
-          if (addressMatch) return true;
-          
-          const salesmanMatch = item.salesman ? item.salesman.toLowerCase().includes(lowercasedFilter) : false;
-          if (salesmanMatch) return true;
-          
-          const teamMatch = item.construction_team ? item.construction_team.toLowerCase().includes(lowercasedFilter) : false;
-          return teamMatch;
-        });
-        
-        // 如果结果很多，分批渲染
-        if (filtered.length > 100) {
-          // 先显示前100条
-          setFilteredCustomers(filtered.slice(0, 100));
-          setDisplayLimit(100);
-          
-          // 在下一帧显示所有结果
-          requestAnimationFrame(() => {
-            setFilteredCustomers(filtered);
-            setDisplayLimit(filtered.length);
+          // 发送数据进行搜索
+          worker.postMessage({
+            customers: memoizedCustomers,
+            searchText: value
           });
-        } else {
-          setFilteredCustomers(filtered);
-          setDisplayLimit(filtered.length);
+        } catch (err) {
+          console.error('Worker创建失败，回退到主线程搜索:', err);
+          performMainThreadSearch();
         }
+      } else {
+        performMainThreadSearch();
+      }
+      
+      // 主线程搜索的实现
+      function performMainThreadSearch() {
+        // 优化搜索逻辑，避免多次toLowerCase()调用
+        const filtered = memoizedCustomers.filter(item => {
+          // 只有在字段有值时才进行搜索比较，避免无效操作
+          const customerName = item.customer_name ? item.customer_name.toLowerCase() : '';
+          const phone = item.phone ? item.phone.toLowerCase() : '';
+          const address = item.address ? item.address.toLowerCase() : '';
+          const salesman = item.salesman ? item.salesman.toLowerCase() : '';
+          const team = item.construction_team ? item.construction_team.toLowerCase() : '';
+          
+          // 使用indexOf代替includes可以略微提升性能
+          return (
+            customerName.indexOf(lowercasedFilter) !== -1 ||
+            phone.indexOf(lowercasedFilter) !== -1 ||
+            address.indexOf(lowercasedFilter) !== -1 ||
+            salesman.indexOf(lowercasedFilter) !== -1 ||
+            team.indexOf(lowercasedFilter) !== -1
+          );
+        });
         
+        setFilteredCustomers(filtered);
         setSearchLoading(false);
         
         // 性能监控 - 结束过滤
         console.timeEnd('搜索过滤');
       }
-    }, 500); // 增加到500ms防抖延迟
-  }, [customers]);
+    }, 800); // 延迟增加到800ms以减少频繁触发
+  }, [memoizedCustomers]);
   
   // 清除防抖定时器
   useEffect(() => {
@@ -220,14 +204,38 @@ const WarehouseManagerDashboard = () => {
 
   // 初次加载时执行一次过滤
   useEffect(() => {
-    handleSearch(searchText);
+    if (customers.length > 0 && searchText.trim() !== '') {
+      handleSearch(searchText);
+    }
   }, [customers, handleSearch, searchText]);
 
   // 获取仓库的客户数据
   useEffect(() => {
-    fetchCustomers()
-    fetchSalesmenInfo() // 获取业务员信息
-  }, [])
+    const loadInitialData = async () => {
+      await fetchCustomers();
+    };
+    
+    loadInitialData();
+    
+    // 添加定时刷新功能，防止数据过期
+    const refreshInterval = setInterval(() => {
+      // 只有在用户没有进行搜索时才自动刷新数据
+      if (searchText.trim() === '') {
+        fetchCustomers();
+      }
+    }, 5 * 60 * 1000); // 5分钟刷新一次
+    
+    return () => {
+      clearInterval(refreshInterval);
+    };
+  }, [searchText]) // 添加searchText作为依赖，以便正确响应搜索状态
+  
+  // 在客户数据加载后获取业务员信息
+  useEffect(() => {
+    if (customers.length > 0) {
+      fetchSalesmenInfo();
+    }
+  }, [customers])  // 依赖于customers，确保在客户数据加载后执行
 
   // 获取客户数据
   const fetchCustomers = async () => {
@@ -250,6 +258,7 @@ const WarehouseManagerDashboard = () => {
       
       // 批量更新UI状态，减少渲染次数
       setCustomers(data)
+      setFilteredCustomers(data) // 确保将所有数据都设置到过滤后的数据中
       
       // 添加性能提示 - 数据处理完成
       console.timeEnd('数据处理和渲染');
@@ -265,6 +274,21 @@ const WarehouseManagerDashboard = () => {
   // 添加获取业务员信息的函数
   const fetchSalesmenInfo = async () => {
     try {
+      // 先从客户数据中提取业务员信息
+      const salesmenFromCustomers = new Map<string, {name: string, phone: string}>();
+      customers.forEach(customer => {
+        if (customer.salesman && customer.salesman.trim() !== '') {
+          // 如果salesman不像邮箱格式，则认为是姓名，直接使用
+          const isEmail = typeof customer.salesman === 'string' && customer.salesman.includes('@');
+          if (!isEmail) {
+            salesmenFromCustomers.set(customer.salesman, {
+              name: customer.salesman,
+              phone: customer.salesman_phone || ''
+            });
+          }
+        }
+      });
+      
       // 从user_roles表获取所有业务员信息
       const { data: salesmenData, error } = await supabase
         .from('user_roles')
@@ -279,6 +303,12 @@ const WarehouseManagerDashboard = () => {
       // 创建邮箱到姓名的映射
       const salesmenMapping = new Map<string, {name: string, phone: string}>();
       
+      // 添加从客户数据中提取的业务员信息
+      salesmenFromCustomers.forEach((value, key) => {
+        salesmenMapping.set(key, value);
+      });
+      
+      // 添加从user_roles获取的信息
       if (salesmenData) {
         salesmenData.forEach(salesman => {
           if (salesman.email) {
@@ -287,11 +317,17 @@ const WarehouseManagerDashboard = () => {
               phone: salesman.phone || ''
             });
           }
+          if (salesman.name) {
+            salesmenMapping.set(salesman.name, {
+              name: salesman.name,
+              phone: salesman.phone || ''
+            });
+          }
         });
       }
       
       setSalesmenMap(salesmenMapping);
-      console.log('业务员映射表已更新:', salesmenMapping);
+      console.log('业务员映射表已更新，包含', salesmenMapping.size, '条记录');
     } catch (err) {
       console.error('获取业务员数据出错:', err);
     }
@@ -300,6 +336,12 @@ const WarehouseManagerDashboard = () => {
   // 根据邮箱获取业务员姓名的函数
   const getSalesmanName = (email: string | null | undefined) => {
     if (!email) return '-';
+    
+    // 尝试直接从映射表中获取
+    const salesmanInfo = salesmenMap.get(email);
+    if (salesmanInfo) {
+      return salesmanInfo.name;
+    }
     
     // 检查是否是邮箱格式
     const isEmail = typeof email === 'string' && email.includes('@');
@@ -610,44 +652,99 @@ const WarehouseManagerDashboard = () => {
     }
   }
 
-  // 导出客户数据
+  // 导出数据
   const handleExport = () => {
+    if (filteredCustomers.length === 0) {
+      message.warning('没有数据可导出');
+      return;
+    }
+
     try {
-      // 准备导出数据
-      const exportData = filteredCustomers.map(customer => ({
-        '客户姓名': customer.customer_name,
-        '客户电话': customer.phone,
-        '客户地址': customer.address,
-        '业务员': customer.salesman,
-        '业务员电话': customer.salesman_phone,
-        '组件数量': customer.module_count,
-        '逆变器': customer.inverter,
-        '配电箱': customer.distribution_box,
-        '铜线': customer.copper_wire,
-        '铝线': customer.aluminum_wire,
-        '方钢出库': customer.square_steel_outbound_date ? dayjs(customer.square_steel_outbound_date).format('YYYY-MM-DD') : '',
-        '组件出库': customer.component_outbound_date ? dayjs(customer.component_outbound_date).format('YYYY-MM-DD') : '',
-        '施工队': customer.construction_team || '',
-        '施工队电话': customer.construction_team_phone || '',
-        '施工状态': customer.construction_status ? '已完工' : '未完工',
-        '图纸变更': customer.drawing_change ? '是' : '否',
-        '催单': customer.urge_order ? '是' : '否',
-        '大线': customer.large_cable || '',
-        '公司': customer.company || '',
-        '备注': customer.remarks || ''
-      }))
-
-      // 创建工作簿
-      const wb = XLSX.utils.book_new()
-      const ws = XLSX.utils.json_to_sheet(exportData)
-      XLSX.utils.book_append_sheet(wb, ws, '仓库客户数据')
-
-      // 导出Excel文件
-      XLSX.writeFile(wb, `仓库客户数据_${dayjs().format('YYYY-MM-DD_HH-mm')}.xlsx`)
-      message.success('导出成功')
+      const loadingMessage = message.loading('正在准备导出数据，请稍候...', 0);
+      setTimeout(() => {
+        try {
+          // 准备导出数据
+          const exportData = filteredCustomers.map(item => ({
+            '客户姓名': item.customer_name,
+            '客户电话': item.phone,
+            '客户地址': item.address,
+            '业务员': getSalesmanName(item.salesman),
+            '业务员电话': item.salesman_phone,
+            '组件数量': item.module_count,
+            '逆变器': item.inverter,
+            '逆变器出库': item.inverter_outbound_date ? dayjs(item.inverter_outbound_date).format('YYYY-MM-DD') : '',
+            '配电箱': item.distribution_box,
+            '配电箱出库': item.distribution_box_outbound_date ? dayjs(item.distribution_box_outbound_date).format('YYYY-MM-DD') : '',
+            '铜线': item.copper_wire,
+            '铜线出库': item.copper_wire_outbound_date ? dayjs(item.copper_wire_outbound_date).format('YYYY-MM-DD') : '',
+            '铝线': item.aluminum_wire,
+            '铝线出库': item.aluminum_wire_outbound_date ? dayjs(item.aluminum_wire_outbound_date).format('YYYY-MM-DD') : '',
+            '方钢出库': item.square_steel_outbound_date === 'RETURNED' ? '退回' 
+              : item.square_steel_outbound_date ? dayjs(item.square_steel_outbound_date).format('YYYY-MM-DD') : '',
+            '方钢回库': item.square_steel_inbound_date ? dayjs(item.square_steel_inbound_date).format('YYYY-MM-DD') : '',
+            '组件出库': item.component_outbound_date === 'RETURNED' ? '退回'
+              : item.component_outbound_date ? dayjs(item.component_outbound_date).format('YYYY-MM-DD') : '',
+            '组件回库': item.component_inbound_date ? dayjs(item.component_inbound_date).format('YYYY-MM-DD') : '',
+            '施工队': item.construction_team,
+            '施工队电话': item.construction_team_phone,
+            '施工状态': item.construction_status ? '已完工' : '未完工',
+            '大线': item.large_cable,
+            '公司': item.company,
+            '备注': item.remarks,
+          }));
+          
+          // 创建工作表
+          const worksheet = XLSX.utils.json_to_sheet(exportData);
+          
+          // 设置列宽
+          const colWidths = [
+            { wch: 12 }, // 客户姓名
+            { wch: 15 }, // 客户电话
+            { wch: 25 }, // 客户地址
+            { wch: 10 }, // 业务员
+            { wch: 15 }, // 业务员电话
+            { wch: 10 }, // 组件数量
+            { wch: 15 }, // 逆变器
+            { wch: 12 }, // 逆变器出库
+            { wch: 15 }, // 配电箱
+            { wch: 12 }, // 配电箱出库
+            { wch: 15 }, // 铜线
+            { wch: 12 }, // 铜线出库
+            { wch: 15 }, // 铝线
+            { wch: 12 }, // 铝线出库
+            { wch: 12 }, // 方钢出库
+            { wch: 12 }, // 方钢回库
+            { wch: 12 }, // 组件出库
+            { wch: 12 }, // 组件回库
+            { wch: 15 }, // 施工队
+            { wch: 15 }, // 施工队电话
+            { wch: 10 }, // 施工状态
+            { wch: 10 }, // 大线
+            { wch: 10 }, // 公司
+            { wch: 25 }, // 备注
+          ];
+          worksheet['!cols'] = colWidths;
+          
+          // 创建工作簿
+          const workbook = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(workbook, worksheet, '仓库数据');
+          
+          // 生成Excel文件并下载
+          const today = dayjs().format('YYYY-MM-DD');
+          const excelFileName = `仓库数据导出_${today}.xlsx`;
+          XLSX.writeFile(workbook, excelFileName);
+          
+          loadingMessage();
+          message.success(`成功导出 ${exportData.length} 条数据`);
+        } catch (err) {
+          loadingMessage();
+          console.error('导出过程中出错:', err);
+          message.error('导出数据失败');
+        }
+      }, 100);
     } catch (error) {
-      message.error('导出失败')
-      console.error(error)
+      console.error('导出初始化失败:', error);
+      message.error('导出数据失败');
     }
   }
 
@@ -1146,35 +1243,6 @@ const WarehouseManagerDashboard = () => {
 
   return (
     <div className="warehouse-dashboard">
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-        <Title level={2}>仓库工作台</Title>
-        <Space>
-          <Input
-            placeholder="搜索客户姓名/电话/地址"
-            value={searchText}
-            onChange={(e) => handleSearch(e.target.value)}
-            style={{ width: 250 }}
-            prefix={<SearchOutlined />}
-            suffix={searchLoading ? <ClockCircleOutlined spin /> : null}
-            allowClear
-          />
-          <Button 
-            icon={<ReloadOutlined />} 
-            onClick={fetchCustomers}
-          >
-            刷新
-          </Button>
-          <Button 
-            type="primary" 
-            icon={<ExportOutlined />}
-            onClick={handleExport}
-            disabled={filteredCustomers.length === 0}
-          >
-            导出数据
-          </Button>
-        </Space>
-      </div>
-
       {/* 统计卡片 */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={6}>
@@ -1252,6 +1320,57 @@ const WarehouseManagerDashboard = () => {
           </Card>
         </Col>
       </Row>
+      
+      {/* 搜索栏和操作按钮放在这里 */}
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <Title level={2} style={{ margin: 0, display: 'inline-block', marginRight: 16 }}>仓库工作台</Title>
+            <Tag color="blue">{filteredCustomers.length}</Tag>
+            <span style={{ marginLeft: 4 }}>条记录</span>
+            {searchText && (
+              <>
+                <Divider type="vertical" style={{ margin: '0 12px', height: 16 }} />
+                <span>
+                  搜索"<Text strong style={{ color: '#1890ff' }}>{searchText}</Text>"找到 
+                  <Tag color="purple" style={{ margin: '0 4px' }}>{filteredCustomers.length}</Tag>
+                  条结果
+                </span>
+              </>
+            )}
+          </div>
+          <Space>
+            <Input
+              placeholder="搜索客户姓名/电话/地址"
+              value={searchText}
+              onChange={(e) => handleSearch(e.target.value)}
+              style={{ width: 250 }}
+              prefix={<SearchOutlined />}
+              suffix={searchLoading ? <ClockCircleOutlined spin /> : null}
+              allowClear
+              autoComplete="off"
+              onCompositionStart={() => setSearchLoading(false)}
+              onCompositionEnd={(e) => handleSearch((e.target as HTMLInputElement).value)}
+            />
+            <Button 
+              icon={<ReloadOutlined />} 
+              onClick={fetchCustomers}
+            >
+              刷新全部数据
+            </Button>
+            <Tooltip title="导出当前筛选数据到Excel表格">
+              <Button 
+                type="primary" 
+                icon={<ExportOutlined />}
+                onClick={handleExport}
+                disabled={filteredCustomers.length === 0}
+              >
+                导出数据
+              </Button>
+            </Tooltip>
+          </Space>
+        </div>
+      </Card>
 
       {/* 客户表格 */}
       <div className="customer-list-container" style={{ height: '100%', display: 'flex', flexDirection: 'column', marginBottom: 0, paddingBottom: 0 }}>
@@ -1260,20 +1379,19 @@ const WarehouseManagerDashboard = () => {
           dataSource={filteredCustomers}
           rowKey="id"
           loading={loading}
-          scroll={{ x: 'max-content', y: 'calc(100vh - 200px)' }}
-          pagination={filteredCustomers.length > 100 ? {
-            pageSize: 100,
-            showSizeChanger: true,
-            pageSizeOptions: ['50', '100', '200'],
-            total: filteredCustomers.length,
-            showTotal: (total) => `共 ${total} 条数据`
-          } : false}
+          scroll={{ x: 'max-content', y: 'calc(100vh - 300px)' }}
+          pagination={false}
           bordered
-          size="middle"
+          size="small"
           tableLayout="fixed"
           className="customer-table"
           style={{ flex: 1 }}
           sticky={{ offsetHeader: 0 }}
+          virtual={true}
+          onRow={() => ({
+            onMouseEnter: undefined,
+            onMouseLeave: undefined
+          })}
         />
       </div>
 
@@ -1410,13 +1528,17 @@ const WarehouseManagerDashboard = () => {
           }
           .warehouse-dashboard .ant-card:hover {
             transform: translateY(-5px);
-            box-shadow: 0 2px 10px rgba(0,0,0,0.12);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.09);
           }
           .warehouse-dashboard .ant-table-thead > tr > th {
             background: #fafafa;
             font-weight: 600;
             text-align: center;
             vertical-align: middle;
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            will-change: transform;
           }
           .customer-table .ant-table-cell {
             vertical-align: middle;
@@ -1424,6 +1546,56 @@ const WarehouseManagerDashboard = () => {
             overflow: hidden;
             text-overflow: ellipsis;
             min-width: 80px;
+            padding: 8px;
+            transform: translate3d(0, 0, 0);
+            backface-visibility: hidden;
+          }
+          
+          /* 增强表格行的可读性 */
+          .customer-table .ant-table-tbody > tr:nth-child(even) {
+            background-color: #fafafa;
+          }
+          
+          .customer-table .ant-table-tbody > tr:hover {
+            background-color: #e6f7ff !important;
+            transition: none !important;
+          }
+          
+          /* 优化表格滚动条 */
+          .customer-table .ant-table-body::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+          }
+          
+          .customer-table .ant-table-body::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+          }
+          
+          .customer-table .ant-table-body::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+          }
+          
+          .customer-table .ant-table-body::-webkit-scrollbar-thumb:hover {
+            background: #555;
+          }
+          
+          /* 优化分页控件 */
+          .customer-table .ant-pagination {
+            margin: 16px 0;
+            text-align: right;
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+          }
+          
+          .customer-table .ant-pagination-options {
+            margin-left: 16px;
+          }
+          
+          .customer-table .ant-select-selector {
+            border-radius: 4px !important;
           }
           
           /* 主容器样式 */
@@ -1440,13 +1612,20 @@ const WarehouseManagerDashboard = () => {
             transition: all 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
           }
           
-          .ant-input-affix-wrapper > input.ant-input {
+          /* 输入框优化 */
+          .ant-input {
             will-change: value;
+            caret-color: #1890ff;
           }
           
           /* 提高渲染性能 */
           .warehouse-dashboard * {
             backface-visibility: hidden;
+          }
+          
+          /* 使用硬件加速 */
+          .customer-table .ant-table-container {
+            transform: translate3d(0, 0, 0);
           }
           
           /* 美化滚动条 - 针对整个页面的所有滚动条 */
@@ -1497,6 +1676,7 @@ const WarehouseManagerDashboard = () => {
             flex-direction: column;
             margin-bottom: 0;
             padding-bottom: 0;
+            transform: translate3d(0, 0, 0);
           }
           
           .ant-table-wrapper, .ant-spin-nested-loading, .ant-spin-container {
@@ -1505,6 +1685,7 @@ const WarehouseManagerDashboard = () => {
           
           .ant-table {
             height: 100%;
+            contain: content;
           }
           
           .ant-table-container {
@@ -1518,6 +1699,7 @@ const WarehouseManagerDashboard = () => {
             z-index: 9;
             position: sticky;
             top: 0;
+            will-change: transform;
           }
           
           .ant-table-body {
@@ -1526,6 +1708,9 @@ const WarehouseManagerDashboard = () => {
             overflow-x: auto !important;
             height: auto !important;
             max-height: none !important;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
+            will-change: scroll-position;
           }
           
           .customer-table .ant-table-thead > tr > th {
@@ -1544,8 +1729,34 @@ const WarehouseManagerDashboard = () => {
             z-index: 9;
             bottom: 0;
           }
+          
+          /* 减少hover动画效果消耗 */
+          .ant-btn:hover, .ant-tag:hover {
+            transition-duration: 0ms !important;
+          }
+          
+          /* 优化重绘性能 */
+          .ant-table-tbody > tr > td {
+            contain: layout style;
+          }
         `}
       </style>
+      
+      {/* 回到顶部按钮 */}
+      <BackTop>
+        <div style={{
+          height: 40,
+          width: 40,
+          lineHeight: '40px',
+          borderRadius: 4,
+          backgroundColor: '#1088e9',
+          color: '#fff',
+          textAlign: 'center',
+          fontSize: 14,
+        }}>
+          <UpOutlined />
+        </div>
+      </BackTop>
     </div>
   )
 }
