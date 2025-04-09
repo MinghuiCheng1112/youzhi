@@ -240,9 +240,11 @@ const DispatchManagerDashboard = () => {
       // 如果施工队为空，确保派工日期也为空
       if (!values.construction_team) {
         values.dispatch_date = null;
+        console.log('施工队为空，派工日期设置为null');
       } else {
         // 如果施工队有数据，则设置派工日期为当前时间
         values.dispatch_date = values.dispatch_date ? values.dispatch_date.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
+        console.log('施工队有值，派工日期设置为:', values.dispatch_date);
       }
       
       // 如果是派工，同时清除催单标记

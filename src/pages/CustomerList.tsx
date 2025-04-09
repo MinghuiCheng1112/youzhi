@@ -2623,15 +2623,19 @@ const CustomerList = () => {
                 construction_team: newValue,
                 dispatch_date: null 
               });
+              console.log('施工队清空，派工日期设置为null');
             } else if (!record.construction_team && newValue) {
               // 如果施工队从无到有，设置派工日期为当前日期
+              const currentDate = new Date().toISOString().split('T')[0];
               customerApi.update(record.id, { 
                 construction_team: newValue,
-                dispatch_date: new Date().toISOString().split('T')[0]
+                dispatch_date: currentDate
               });
+              console.log('施工队从无到有，派工日期设置为当前日期:', currentDate);
             } else {
               // 仅更新施工队
               customerApi.update(record.id, { construction_team: newValue });
+              console.log('仅更新施工队值:', newValue);
             }
           }}
         />;
@@ -2850,7 +2854,7 @@ const CustomerList = () => {
       width: 130,
       align: 'center' as const,
       render: (text, record) => {
-        // 如果已完成验收
+        // 如果已验收（有时间戳）
         if (text) {
           return (
             <Tooltip title='点击恢复为未推到状态'>
@@ -2864,7 +2868,7 @@ const CustomerList = () => {
             </Tooltip>
           );
         } else {
-          // 未推到状态，显示按钮
+          // 未验收状态（未推到），显示按钮
           return (
             <Button 
               type="primary" 
@@ -3523,7 +3527,7 @@ const CustomerList = () => {
         construction_acceptance_date: currentDate ? null : new Date().toISOString()
       };
       
-      console.log(`[建设验收] 更新客户(${id})的建设验收状态，采用缓存+异步模式`);
+      console.log(`[建设验收] 更新客户(${id})的建设验收状态，${currentDate ? '恢复为未推到状态' : '设置为已推到状态'}`);
       
       // 使用数据缓存服务更新数据，UI立即响应
       const updatedCustomer = customerApi.updateWithCache(id, updateObj);
@@ -3537,7 +3541,7 @@ const CustomerList = () => {
       );
       
       // 显示成功消息
-      const successMsg = currentDate ? '已重置为未推到状态' : '已标记为推到完成';
+      const successMsg = currentDate ? '已恢复为未推到状态' : '已标记为已推到';
       message.success(successMsg);
     } catch (error) {
       console.error('[建设验收] 操作过程出错:', error);
@@ -3545,8 +3549,8 @@ const CustomerList = () => {
       if (error instanceof Error) {
         message.error(`更新失败: ${error.message}`);
       } else {
-      message.error('操作失败，请重试');
-    }
+        message.error('操作失败，请重试');
+      }
       
       // 失败时重新获取数据
       fetchCustomers();

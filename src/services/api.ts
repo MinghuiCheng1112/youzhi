@@ -591,6 +591,12 @@ export const customerApi = {
     // 记录原始数据，帮助调试
     console.log(`updateWithCache原始数据(ID: ${id}):`, JSON.stringify(processedUpdates));
     
+    // 重要：以下字段应该相互独立更新，不应相互影响
+    // 1. construction_acceptance_date (建设验收) 
+    // 2. upload_to_grid (上传国网)
+    // 3. status (状态)
+    // 当更新其中一个字段时，不应自动修改其他字段的值
+    
     // 特殊处理设计师和踏勘员字段
     // 如果设计师为空，确保设计师电话也为空
     if ('designer' in processedUpdates && 

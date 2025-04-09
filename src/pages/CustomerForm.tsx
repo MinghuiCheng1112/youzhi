@@ -389,12 +389,14 @@ const CustomerForm = () => {
 
   // 建设验收按钮操作
   const handleConstructionAcceptance = () => {
-    const currentValue = form.getFieldValue('construction_acceptance_status')
-    const newValue = currentValue === 'completed' ? 'pending' : 'completed'
+    const currentValue = form.getFieldValue('construction_acceptance_date')
+    // 如果当前有值，清空；如果没有值，设置为当前时间
+    const newValue = currentValue ? null : new Date().toISOString()
     form.setFieldsValue({ 
-      construction_acceptance_status: newValue,
-      construction_acceptance_date: newValue === 'completed' ? new Date().toISOString() : null
+      construction_acceptance_date: newValue
     })
+    
+    console.log(`[建设验收] ${currentValue ? '重置为未推到状态' : '设置为已推到状态'}`);
   }
 
   // 挂表日期按钮操作
@@ -851,6 +853,7 @@ const CustomerForm = () => {
                     form.setFieldsValue({ construction_team_phone: option.phone });
                     // 如果施工队有值，设置派工日期为当前日期
                     form.setFieldsValue({ dispatch_date: dayjs() });
+                    console.log('施工队设置为:', value, '，派工日期设置为当前日期');
                   } else if (!value) {
                     // 如果清空了施工队，也清空电话和派工日期
                     form.setFieldsValue({ 
@@ -926,11 +929,11 @@ const CustomerForm = () => {
           
           <Col xs={24} sm={12} md={8}>
             <Form.Item
-              name="construction_acceptance_status"
+              name="construction_acceptance_date"
               label="建设验收"
             >
               <div>
-                {renderButtonOrTimestamp('construction_acceptance_status', '未到', handleConstructionAcceptance)}
+                {renderButtonOrTimestamp('construction_acceptance_date', '未推到', handleConstructionAcceptance)}
               </div>
             </Form.Item>
           </Col>

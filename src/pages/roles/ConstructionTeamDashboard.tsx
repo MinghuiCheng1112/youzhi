@@ -825,11 +825,12 @@ const ConstructionTeamDashboard = () => {
       
       // 设置派工日期为当前日期
       const now = new Date().toISOString();
+      const currentDate = now.split('T')[0]; // 只获取日期部分 YYYY-MM-DD
       const updateData = {
         construction_team: constructionTeam,
         construction_team_phone: constructionTeamPhone,
         // construction_team_email: constructionTeamEmail, // 删除不存在的字段
-        dispatch_date: now.split('T')[0], // 只获取日期部分 YYYY-MM-DD
+        dispatch_date: currentDate,
         updated_at: now // 更新时间
         // 移除数据库中不存在的字段
         // assigned_at: now, // 添加分配时间，方便后续查询
@@ -837,6 +838,7 @@ const ConstructionTeamDashboard = () => {
       };
       
       console.log('更新客户数据:', updateData);
+      console.log('施工队不为空，设置派工日期为当前日期:', currentDate);
       
       // 先标记验证码为已使用，确保验证码只能使用一次
       try {
