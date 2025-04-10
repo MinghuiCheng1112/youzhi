@@ -359,27 +359,6 @@ const FilingOfficerDashboard = () => {
 
   return (
     <div className="filing-dashboard">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <Title level={2} style={{ margin: 0 }}>备案工作台</Title>
-        <Space>
-          <Button 
-            icon={<ReloadOutlined />} 
-            onClick={fetchCustomers}
-            loading={loading}
-          >
-            刷新
-          </Button>
-          <Button 
-            type="primary" 
-            icon={<ExportOutlined />} 
-            onClick={handleExport}
-            disabled={filteredCustomers.length === 0}
-          >
-            导出
-          </Button>
-        </Space>
-      </div>
-
       {/* 统计卡片 */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={4}>
@@ -448,32 +427,50 @@ const FilingOfficerDashboard = () => {
         </Col>
       </Row>
 
+      {/* 搜索栏 - 按要求将标题放在搜索框前边 */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, marginBottom: 16 }}>
+        <Space size="middle">
+          <Title level={2} style={{ margin: 0 }}>备案工作台</Title>
+          <Input
+            placeholder="搜索客户姓名、电话、地址等"
+            prefix={<SearchOutlined />}
+            style={{ width: 300 }}
+            value={searchText}
+            onChange={e => handleSearch(e.target.value)}
+            allowClear
+          />
+        </Space>
+        
+        <Space>
+          <Button 
+            icon={<ReloadOutlined />} 
+            onClick={fetchCustomers}
+            loading={loading}
+          >
+            刷新
+          </Button>
+          
+          <Button 
+            type="primary" 
+            icon={<ExportOutlined />} 
+            onClick={handleExport}
+            disabled={filteredCustomers.length === 0}
+          >
+            导出
+          </Button>
+          
+          <Text>
+            {filteredCustomers.length > 0 ? `显示 ${filteredCustomers.length} 条记录，共 ${customers.length} 条` : '显示 0 条记录，共 0 条'}
+          </Text>
+        </Space>
+      </div>
+
       <Card 
         style={{ 
           boxShadow: '0 1px 2px -2px rgba(0, 0, 0, 0.16), 0 3px 6px 0 rgba(0, 0, 0, 0.12), 0 5px 12px 4px rgba(0, 0, 0, 0.09)',
-          borderRadius: '8px',
-          marginTop: 16
+          borderRadius: '8px'
         }}
       >
-        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
-          <Space direction="vertical" size={0} style={{ width: 300 }}>
-            <Input
-              placeholder="搜索客户姓名、电话、地址等"
-              prefix={<SearchOutlined />}
-              style={{ width: 300 }}
-              value={searchText}
-              onChange={e => handleSearch(e.target.value)}
-              allowClear
-            />
-            <Text type="secondary" style={{ fontSize: '12px' }}>
-              提示: 默认精准匹配，多个关键词请用空格或逗号分隔
-            </Text>
-          </Space>
-          <Text>
-            {filteredCustomers.length > 0 ? `显示 ${filteredCustomers.length} 条记录，共 ${customers.length} 条` : ''}
-          </Text>
-        </div>
-
         <Table
           columns={columns}
           dataSource={filteredCustomers}
