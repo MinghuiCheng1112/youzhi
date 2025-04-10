@@ -6,6 +6,11 @@ import App from './App.tsx'
 import './index.css'
 import { AuthProvider } from './contexts/AuthContext'
 import ensureDatabaseStructure from './utils/checkDatabase'
+import dayjs from 'dayjs'
+import 'dayjs/locale/zh-cn'
+
+// 设置dayjs为中文
+dayjs.locale('zh-cn')
 
 const queryClient = new QueryClient()
 

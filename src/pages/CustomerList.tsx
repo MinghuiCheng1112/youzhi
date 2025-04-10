@@ -31,6 +31,7 @@ import { updateConstructionAcceptance } from '../services/api_fix'
 const { Title } = Typography
 const { confirm } = Modal
 const { Dragger } = Upload
+const { RangePicker } = DatePicker
 
 // 扩展Window接口，添加scrollTimer属性
 declare global {
@@ -183,6 +184,10 @@ const CustomerList = () => {
     '创建时间': false,
     '最后更新': false,
   });
+
+  // 添加日期筛选相关状态
+  const [registerDateRange, setRegisterDateRange] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null] | null>(null);
+  const [filingDateRange, setFilingDateRange] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null] | null>(null);
 
   useEffect(() => {
     fetchCustomers()
@@ -376,45 +381,166 @@ const CustomerList = () => {
 
   // 优化的搜索函数
   const performSearch = (value: string) => {
-    // 如果搜索为空，直接返回所有数据
-    if (!value.trim()) {
-      setFilteredCustomers(customers);
-      setTotalPages(Math.ceil(customers.length / pageSize));
+    const isSearching = true;
+    
+    try {
+      const trimmed = value.trim();
+      
+      // 检查是否有任何筛选条件
+      if (trimmed === '' && !registerDateRange && !filingDateRange) {
+        // 如果没有搜索关键词和日期筛选，恢复全部数据
+        setFilteredCustomers(customers);
+        setTotalPages(Math.ceil(customers.length / pageSize));
+        setCurrentPage(1); // 重置到第一页
+        return;
+      }
+      
+      // 先按日期范围筛选客户
+      let dateFilteredCustomers = [...customers];
+      
+      // 按登记日期筛选
+      if (registerDateRange && registerDateRange[0] && registerDateRange[1]) {
+        const startDate = registerDateRange[0].startOf('day');
+        const endDate = registerDateRange[1].endOf('day');
+        
+        dateFilteredCustomers = dateFilteredCustomers.filter(customer => {
+          if (!customer.register_date) return false;
+          const customerDate = dayjs(customer.register_date);
+          return customerDate.isAfter(startDate) && customerDate.isBefore(endDate);
+        });
+      }
+      
+      // 按备案日期筛选
+      if (filingDateRange && filingDateRange[0] && filingDateRange[1]) {
+        const startDate = filingDateRange[0].startOf('day');
+        const endDate = filingDateRange[1].endOf('day');
+        
+        dateFilteredCustomers = dateFilteredCustomers.filter(customer => {
+          if (!customer.filing_date) return false;
+          const customerDate = dayjs(customer.filing_date);
+          return customerDate.isAfter(startDate) && customerDate.isBefore(endDate);
+        });
+      }
+      
+      // 如果没有搜索关键词，只进行日期筛选
+      if (trimmed === '') {
+        setFilteredCustomers(dateFilteredCustomers);
+        setTotalPages(Math.ceil(dateFilteredCustomers.length / pageSize));
+        setCurrentPage(1); // 重置到第一页
+        return;
+      }
+      
+      // 支持空格或逗号分隔的多关键词搜索
+      const keywords = trimmed.split(/[\s,，]+/)
+        .filter(keyword => keyword.trim() !== ''); // 过滤掉空字符串
+      
+      if (keywords.length === 0) {
+        setFilteredCustomers(dateFilteredCustomers);
+        setTotalPages(Math.ceil(dateFilteredCustomers.length / pageSize));
+        setCurrentPage(1); // 重置到第一页
+        return;
+      }
+      
+      // 获取启用的搜索字段
+      const enabledFields = Object.entries(searchFields)
+        .filter(([_, enabled]) => enabled)
+        .map(([field]) => field);
+      
+      // 如果没有启用任何字段，使用默认字段
+      if (enabledFields.length === 0) {
+        enabledFields.push('customer_name', 'phone', 'address', 'salesman', 'id_card', 'meter_number');
+      }
+      
+      // 在日期筛选结果的基础上进行关键词筛选
+      const filtered = dateFilteredCustomers.filter(customer => {
+        // 检查启用的每个字段
+        return keywords.some(keyword => 
+          enabledFields.some(field => {
+            const fieldValue = ((customer as any)[field] || '').toString().toLowerCase();
+            return fieldValue.includes(keyword.toLowerCase());
+          })
+        );
+      });
+      
+      setFilteredCustomers(filtered);
+      setTotalPages(Math.ceil(filtered.length / pageSize));
       setCurrentPage(1); // 重置到第一页
-      return;
+    } catch (error) {
+      console.error('搜索出错:', error);
+      message.error('搜索过程中出现错误');
     }
-
-    // 支持空格或逗号分隔的多关键词搜索
-    const keywords = value.toLowerCase()
-      .split(/[\s,，]+/) // 按空格或中英文逗号分隔
-      .filter(keyword => keyword.trim() !== ''); // 过滤掉空字符串
-    
-    // 获取启用的搜索字段
-    const enabledFields = Object.entries(searchFields)
-      .filter(([_, enabled]) => enabled)
-      .map(([field]) => field);
-    
-    // 如果没有启用任何字段，使用默认字段
-    if (enabledFields.length === 0) {
-      enabledFields.push('customer_name', 'phone', 'address', 'salesman', 'id_card', 'meter_number');
-    }
-    
-    // 直接过滤所有数据，不再分批处理
-    const filtered = customers.filter(customer => {
-      // 检查启用的每个字段
-      return keywords.some(keyword => 
-        enabledFields.some(field => {
-          const fieldValue = (customer[field as keyof Customer] || '').toString().toLowerCase();
-          return fieldValue.includes(keyword);
-        })
-      );
-    });
-    
-    setFilteredCustomers(filtered);
-    setTotalPages(Math.ceil(filtered.length / pageSize));
-    setCurrentPage(1); // 重置到第一页
   };
   
+  // 处理日期范围变化
+  const handleRegisterDateChange = (dates: [dayjs.Dayjs | null, dayjs.Dayjs | null] | null) => {
+    setRegisterDateRange(dates);
+  };
+  
+  const handleFilingDateChange = (dates: [dayjs.Dayjs | null, dayjs.Dayjs | null] | null) => {
+    setFilingDateRange(dates);
+  };
+  
+  // 清除所有筛选条件
+  const clearAllFilters = () => {
+    setRegisterDateRange(null);
+    setFilingDateRange(null);
+    setSearchText('');
+    performSearch('');
+  };
+  
+  // 添加日期筛选组件
+  const renderDateFilters = () => (
+    <div style={{ marginBottom: 16, backgroundColor: '#f5f5f5', padding: 12, borderRadius: 4 }}>
+      <Row gutter={[16, 8]} align="middle">
+        <Col xs={24} sm={24} md={7} lg={7} xl={7}>
+          <Space>
+            <span style={{ whiteSpace: 'nowrap' }}>登记日期:</span>
+            <RangePicker 
+              value={registerDateRange} 
+              onChange={handleRegisterDateChange} 
+              style={{ width: '100%' }}
+              allowClear={true}
+              placeholder={['开始日期', '结束日期']}
+              format="YYYY-MM-DD"
+            />
+          </Space>
+        </Col>
+        <Col xs={24} sm={24} md={7} lg={7} xl={7}>
+          <Space>
+            <span style={{ whiteSpace: 'nowrap' }}>备案日期:</span>
+            <RangePicker 
+              value={filingDateRange} 
+              onChange={handleFilingDateChange} 
+              style={{ width: '100%' }}
+              allowClear={true}
+              placeholder={['开始日期', '结束日期']}
+              format="YYYY-MM-DD"
+            />
+          </Space>
+        </Col>
+        <Col xs={24} sm={24} md={10} lg={10} xl={10} style={{ textAlign: 'right' }}>
+          <Space size="small">
+            <Button 
+              type="primary" 
+              onClick={() => performSearch(searchText)}
+              icon={<SearchOutlined />}
+              disabled={loading}
+            >
+              应用筛选
+            </Button>
+            <Button 
+              onClick={clearAllFilters}
+              icon={<CloseCircleOutlined />}
+              disabled={loading}
+            >
+              清除筛选
+            </Button>
+          </Space>
+        </Col>
+      </Row>
+    </div>
+  );
+
   // 使用立即处理的方式代替防抖，避免延迟
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -4856,6 +4982,7 @@ const CustomerList = () => {
 
   return (
     <div className="customer-list-container" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {renderDateFilters()}
       {renderTitleBar()}
       
       <Form form={editForm} style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
