@@ -500,8 +500,6 @@ const CustomerList = () => {
               onChange={handleRegisterDateChange} 
               style={{ width: '100%' }}
               allowClear={true}
-              placeholder={['开始日期', '结束日期']}
-              format="YYYY-MM-DD"
             />
           </Space>
         </Col>
@@ -513,8 +511,1736 @@ const CustomerList = () => {
               onChange={handleFilingDateChange} 
               style={{ width: '100%' }}
               allowClear={true}
-              placeholder={['开始日期', '结束日期']}
-              format="YYYY-MM-DD"
+            />
+          </Space>
+        </Col>
+        <Col xs={24} sm={24} md={10} lg={10} xl={10} style={{ textAlign: 'right' }}>
+          <Space size="small">
+            <Button 
+              type="primary" 
+              onClick={() => performSearch(searchText)}
+              icon={<SearchOutlined />}
+              disabled={loading}
+            >
+              应用筛选
+            </Button>
+            <Button 
+              onClick={clearAllFilters}
+              icon={<CloseCircleOutlined />}
+              disabled={loading}
+            >
+              清除筛选
+            </Button>
+          </Space>
+        </Col>
+      </Row>
+    </div>
+  );
+
+  // 使用立即处理的方式代替防抖，避免延迟
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setSearchText(value);
+    
+    // 只有在输入长度大于1或为空时才触发搜索，避免单个字符时的频繁搜索
+    // 但不显示未找到的提示，只在用户主动搜索时才显示
+    if (value.length > 1 || !value) {
+      performSearch(value);
+    }
+  };
+
+  // 判断单元格是否处于编辑状态
+  const isEditing = (record: Customer, dataIndex: string) => {
+    return record.id === editingCell?.id && dataIndex === editingCell?.dataIndex;
+  };
+
+  // 开始编辑单元格
+  const edit = (record: Customer, dataIndex: string) => {
+    console.log('开始编辑字段:', dataIndex, '客户ID:', record.id, '当前值:', record[dataIndex as keyof Customer]);
+    
+    // 标记正在编辑状态，避免虚拟滚动重新计算
+    editingRef.current = true;
+    
+    // 在大页面模式下，确保在状态更新前先设置表单值，避免延迟
+    if (pageSize >= 500) {
+      // 先设置表单值，再设置编辑状态
+      editForm.setFieldsValue({
+        [dataIndex]: record[dataIndex as keyof Customer]
+      });
+      
+      // 针对特定字段的处理
+      if (dataIndex === 'construction_team') {
+        const currentTeam = record.construction_team;
+        const currentPhone = record.construction_team_phone;
+        console.log('编辑施工队:', currentTeam, '当前电话:', currentPhone);
+        
+        editForm.setFieldsValue({
+          construction_team: currentTeam,
+          construction_team_phone: currentPhone
+        });
+      } else if (dataIndex === 'salesman') {
+        // 同时设置业务员电话
+        editForm.setFieldsValue({
+          salesman_phone: record.salesman_phone
+        });
+      } else if (dataIndex === 'designer') {
+        // 同时设置设计师电话
+        editForm.setFieldsValue({
+          designer_phone: record.designer_phone
+        });
+      } else if (dataIndex === 'surveyor') {
+        // 同时设置踏勘员电话
+        editForm.setFieldsValue({
+          surveyor_phone: record.surveyor_phone
+        });
+      }
+      
+      // 使用requestAnimationFrame确保在下一帧渲染
+      requestAnimationFrame(() => {
+        setEditingCell({ id: record.id, dataIndex });
+        
+        // 找到并聚焦到编辑元素
+        setTimeout(() => {
+          const editInput = document.querySelector('.customer-table .ant-table-cell-editing input, .customer-table .ant-table-cell-editing textarea, .customer-table .ant-table-cell-editing .ant-select');
+          if (editInput) {
+            (editInput as HTMLElement).focus();
+          }
+        }, 50);
+      });
+    } else {
+      // 常规页面模式的编辑流程
+    setEditingCell({ id: record.id, dataIndex });
+    
+    // 如果是编辑施工队，预先设置施工队电话到表单
+    if (dataIndex === 'construction_team') {
+      const currentTeam = record.construction_team;
+      const currentPhone = record.construction_team_phone;
+      console.log('编辑施工队:', currentTeam, '当前电话:', currentPhone);
+      
+      // 用于防止电话覆盖
+      editForm.setFieldsValue({
+        construction_team: currentTeam,
+        construction_team_phone: currentPhone
+      });
+    }
+    
+    // 设置当前编辑字段的值到表单
+        editForm.setFieldsValue({
+      [dataIndex]: record[dataIndex as keyof Customer]
+    });
+    
+    // 针对特定字段的处理
+    if (dataIndex === 'salesman') {
+      // 同时设置业务员电话
+        editForm.setFieldsValue({
+        salesman_phone: record.salesman_phone
+      });
+      }
+    }
+  };
+
+  // 取消编辑
+  const cancel = () => {
+    setEditingCell(null);
+    // 编辑结束时重置标记
+    editingRef.current = false;
+  };
+
+  /**
+   * 保存编辑的单元格数据
+   * @param {string} id - 客户ID
+   */
+  const saveEditedCell = async (id: string) => {
+    if (!editingCell) return;
+    
+    try {
+      // 验证表单字段
+      const values = await editForm.validateFields();
+      console.log('验证通过的编辑数据:', values);
+      console.log('当前编辑单元格:', editingCell);
+      
+      // 创建更新对象
+      const updateData: any = {};
+      
+      // 添加被编辑的字段
+      const dataIndex = editingCell.dataIndex;
+      updateData[dataIndex] = values[dataIndex];
+      
+      // 处理tags模式下的数组值
+      if (['salesman', 'designer', 'surveyor', 'construction_team'].includes(dataIndex)) {
+        // 如果是空数组，则设置为null
+        if (Array.isArray(values[dataIndex]) && values[dataIndex].length === 0) {
+          updateData[dataIndex] = null;
+          console.log(`${dataIndex}字段为空数组，将其转换为null`);
+        } 
+        // 如果是只有一个元素的数组，则取第一个元素
+        else if (Array.isArray(values[dataIndex]) && values[dataIndex].length === 1) {
+          updateData[dataIndex] = values[dataIndex][0];
+          console.log(`${dataIndex}字段为单元素数组，取第一个元素:`, values[dataIndex][0]);
+        }
+        // 如果数组有多个元素，只取第一个元素（因为我们设置了maxTagCount=1）
+        else if (Array.isArray(values[dataIndex]) && values[dataIndex].length > 1) {
+          updateData[dataIndex] = values[dataIndex][0];
+          console.log(`${dataIndex}字段有多个元素，只保留第一个:`, values[dataIndex][0]);
+        }
+      }
+      
+      // 如果编辑施工队字段，同时保存施工队电话
+      if (dataIndex === 'construction_team') {
+        console.log('正在保存施工队字段:', values[dataIndex]);
+        // 获取施工队电话并添加到更新数据中
+        if (values.construction_team_phone !== undefined) {
+          updateData.construction_team_phone = values.construction_team_phone;
+          console.log('同时更新施工队电话:', values.construction_team_phone);
+        } else if (values.construction_team) {
+          // 如果没有明确设置电话但选择了施工队，尝试从施工队列表找到对应电话
+          const teamInfo = constructionTeams.find(team => team.name === values.construction_team);
+          if (teamInfo && teamInfo.phone) {
+            updateData.construction_team_phone = teamInfo.phone;
+            console.log('根据施工队名称自动设置电话:', teamInfo.phone);
+          }
+        } else {
+          // 如果施工队被清空，也清空施工队电话
+          updateData.construction_team_phone = null;
+          console.log('施工队被清空，同时清空施工队电话');
+        }
+      }
+      
+      // 如果编辑的是施工队电话字段，将新电话更新到具有相同施工队名称的所有记录
+      if (dataIndex === 'construction_team_phone') {
+        console.log('正在更新施工队电话:', values.construction_team_phone);
+      }
+      
+      // 如果编辑设计师字段，同时保存设计师电话
+      if (dataIndex === 'designer') {
+        console.log('正在保存设计师字段:', values[dataIndex]);
+        // 获取设计师电话并添加到更新数据中
+        if (values.designer_phone !== undefined) {
+          updateData.designer_phone = values.designer_phone;
+          console.log('同时更新设计师电话:', values.designer_phone);
+        } else if (values.designer) {
+          // 如果没有明确设置电话但选择了设计师，尝试从设计师列表找到对应电话
+          const designerInfo = designers.find(designer => designer.name === values.designer);
+          if (designerInfo && designerInfo.phone) {
+            updateData.designer_phone = designerInfo.phone;
+            console.log('根据设计师名称自动设置电话:', designerInfo.phone);
+          }
+        } else {
+          // 如果设计师被清空，也清空设计师电话
+          updateData.designer_phone = null;
+          console.log('设计师被清空，同时清空设计师电话');
+        }
+      }
+      
+      // 如果编辑踏勘员字段，同时保存踏勘员电话
+      if (dataIndex === 'surveyor') {
+        console.log('正在保存踏勘员字段:', values[dataIndex]);
+        // 获取踏勘员电话并添加到更新数据中
+        if (values.surveyor_phone !== undefined) {
+          updateData.surveyor_phone = values.surveyor_phone;
+          console.log('同时更新踏勘员电话:', values.surveyor_phone);
+        } else if (values.surveyor) {
+          // 如果没有明确设置电话但选择了踏勘员，尝试从踏勘员列表找到对应电话
+          const surveyorInfo = surveyors.find(surveyor => surveyor.name === values.surveyor);
+          if (surveyorInfo && surveyorInfo.phone) {
+            updateData.surveyor_phone = surveyorInfo.phone;
+            console.log('根据踏勘员名称自动设置电话:', surveyorInfo.phone);
+          }
+        } else {
+          // 如果踏勘员被清空，也清空踏勘员电话
+          updateData.surveyor_phone = null;
+          console.log('踏勘员被清空，同时清空踏勘员电话');
+        }
+      }
+      
+      // 如果编辑业务员字段，同时保存业务员电话
+      if (dataIndex === 'salesman') {
+        console.log('正在保存业务员字段:', values[dataIndex]);
+        // 获取业务员电话并添加到更新数据中
+        if (values.salesman_phone !== undefined) {
+          updateData.salesman_phone = values.salesman_phone;
+          console.log('同时更新业务员电话:', values.salesman_phone);
+        } else if (values.salesman) {
+          // 如果没有明确设置电话但选择了业务员，尝试从业务员列表找到对应电话
+          const salesmanInfo = salesmenList.find(salesman => salesman.name === values.salesman);
+          if (salesmanInfo && salesmanInfo.phone) {
+            updateData.salesman_phone = salesmanInfo.phone;
+            console.log('根据业务员名称自动设置电话:', salesmanInfo.phone);
+          }
+        }
+      }
+      
+      // 特别处理module_count字段
+      if (dataIndex === 'module_count') {
+        const moduleCountValue = values.module_count;
+        console.log('处理module_count值:', moduleCountValue, '类型:', typeof moduleCountValue);
+        
+        // 如果为空字符串或undefined，设置为null
+        if (moduleCountValue === '' || moduleCountValue === undefined) {
+          // 当组件数量为空时，相关字段也设置为空值
+          updateData.module_count = null;
+          updateData.capacity = null;
+          updateData.investment_amount = null;
+          updateData.land_area = null;
+          console.log('将module_count及相关字段的值转换为null');
+        } else if (typeof moduleCountValue === 'string') {
+          // 如果是字符串，尝试转换为数字
+          const numValue = Number(moduleCountValue);
+          if (!isNaN(numValue)) {
+            updateData.module_count = numValue;
+            console.log('将module_count字符串转换为数字:', moduleCountValue, '->', numValue);
+            
+            // 如果是有效数字，计算相关字段
+            if (numValue > 0) {
+              const calculatedFields = calculateAllFields(numValue);
+              Object.assign(updateData, calculatedFields);
+              console.log('自动计算相关字段:', calculatedFields);
+              } else {
+              // 如果组件数量为0，相关字段也设置为空值
+              updateData.capacity = null;
+              updateData.investment_amount = null;
+              updateData.land_area = null;
+              console.log('组件数量为0，相关字段设置为null');
+              }
+            } else {
+            // 无效的数字字符串，组件数量及相关字段都设置为null
+            updateData.module_count = null;
+            updateData.capacity = null;
+            updateData.investment_amount = null;
+            updateData.land_area = null;
+            console.log('将module_count无效字符串及相关字段转换为null:', moduleCountValue);
+          }
+        } else if (typeof moduleCountValue === 'number') {
+          // 如果已经是数字类型，且是有效数字，计算相关字段
+          if (!isNaN(moduleCountValue) && moduleCountValue > 0) {
+            const calculatedFields = calculateAllFields(moduleCountValue);
+            Object.assign(updateData, calculatedFields);
+            console.log('数字类型，自动计算相关字段:', calculatedFields);
+          } else {
+            // 数字为0或NaN，相关字段也设置为空值
+            updateData.capacity = null;
+            updateData.investment_amount = null;
+            updateData.land_area = null;
+            console.log('组件数量为0或NaN，相关字段设置为null');
+          }
+        }
+      }
+      
+      // 特殊处理图纸变更字段
+      if (dataIndex === 'drawing_change') {
+        if (values.drawing_change === undefined || values.drawing_change === '') {
+          updateData.drawing_change = '未出图';
+        }
+      }
+      
+      // 处理补充资料字段中的"日期"选项
+      if (dataIndex === 'station_management') {
+        // 检查是否选择了"日期"选项
+        if (Array.isArray(values.station_management) && values.station_management.includes('日期')) {
+          // 创建当前时间戳
+          const currentTimestamp = new Date().toISOString();
+          
+          // 从选项中移除"日期"
+          const optionsWithoutDate = values.station_management.filter(item => item !== '日期');
+          
+          // 将其他选项和时间戳一起保存在station_management字段中
+          // 保存格式：[选项1, 选项2, ..., 时间戳]
+          updateData[dataIndex] = [...optionsWithoutDate, currentTimestamp];
+          
+          console.log('检测到"日期"选项，添加时间戳:', currentTimestamp);
+        }
+      }
+      
+      // 记录将发送到API的数据
+      console.log('将发送到API的更新数据:', updateData);
+      
+      // 使用缓存服务更新数据
+      customerApi.updateWithCache(id, updateData);
+      
+      // 查找当前编辑客户的索引
+      const index = customers.findIndex(customer => customer.id === id);
+      const filteredIndex = filteredCustomers.findIndex(customer => customer.id === id);
+      
+      if (index > -1) {
+        // 更新本地状态
+        const newCustomers = [...customers];
+        newCustomers[index] = { ...newCustomers[index], ...updateData };
+        console.log('更新后的客户数据:', newCustomers[index]);
+        setCustomers(newCustomers);
+      }
+      
+      if (filteredIndex > -1) {
+        // 更新筛选后的数据
+        const newFilteredCustomers = [...filteredCustomers];
+        newFilteredCustomers[filteredIndex] = { ...newFilteredCustomers[filteredIndex], ...updateData };
+        setFilteredCustomers(newFilteredCustomers);
+      }
+      
+      // 在500条/页和1000条/页模式下，确保更新页面缓存
+      if (pageSize >= 500 && cachedPageData) {
+        // 更新页面缓存中的数据
+        const updatedCachedData = { ...cachedPageData };
+        
+        // 遍历所有缓存页查找并更新数据
+        Object.keys(updatedCachedData).forEach(pageKey => {
+          const page = parseInt(pageKey);
+          const pageData = updatedCachedData[page];
+          const cachedIndex = pageData.findIndex(customer => customer.id === id);
+          
+          if (cachedIndex > -1) {
+            // 更新缓存中的客户数据
+            pageData[cachedIndex] = { ...pageData[cachedIndex], ...updateData };
+            console.log(`已更新页面缓存 ${page} 中的客户数据`);
+          }
+        });
+        
+        // 保存更新后的缓存
+        setCachedPageData(updatedCachedData);
+        
+        // 强制重新渲染分页数据
+        setForceUpdate(prev => prev + 1);
+      }
+      
+      // 退出编辑状态
+      setEditingCell(null);
+      
+      // 显示成功消息
+      message.success('数据已更新');
+      
+      // 如果编辑的是施工队电话，自动更新所有相同施工队名称的记录
+      if (dataIndex === 'construction_team_phone') {
+        const currentCustomer = customers.find(customer => customer.id === id);
+        if (currentCustomer && currentCustomer.construction_team && values.construction_team_phone) {
+          const teamName = currentCustomer.construction_team;
+          const newPhone = values.construction_team_phone;
+          console.log(`准备更新所有施工队 "${teamName}" 的电话为 ${newPhone}`);
+          
+          // 找到所有具有相同施工队名称的记录
+          const recordsToUpdate = customers.filter(
+            c => c.id !== id && c.construction_team === teamName
+          );
+          
+          if (recordsToUpdate.length > 0) {
+            console.log(`找到 ${recordsToUpdate.length} 条需要更新电话的记录`);
+            
+            // 批量更新这些记录
+            const updatePromises = recordsToUpdate.map(customer => {
+              return customerApi.updateWithCache(customer.id, {
+                construction_team_phone: newPhone
+              });
+            });
+            
+            // 等待所有更新完成
+            await Promise.all(updatePromises);
+            
+            // 更新本地状态
+            setCustomers(prev => 
+              prev.map(customer => 
+                customer.construction_team === teamName
+                  ? { ...customer, construction_team_phone: newPhone }
+                  : customer
+              )
+            );
+            
+            setFilteredCustomers(prev => 
+              prev.map(customer => 
+                customer.construction_team === teamName
+                  ? { ...customer, construction_team_phone: newPhone }
+                  : customer
+              )
+            );
+            
+            message.success(`已自动更新所有"${teamName}"的电话号码`);
+          } else {
+            console.log('没有找到其他需要更新电话的相同施工队记录');
+          }
+        }
+      }
+      
+      // 如果编辑的是设计师电话，自动更新所有相同设计师名称的记录
+      if (dataIndex === 'designer_phone') {
+        const currentCustomer = customers.find(customer => customer.id === id);
+        if (currentCustomer && currentCustomer.designer && values.designer_phone) {
+          const designerName = currentCustomer.designer;
+          const newPhone = values.designer_phone;
+          console.log(`准备更新所有设计师 "${designerName}" 的电话为 ${newPhone}`);
+          
+          // 找到所有具有相同设计师名称的记录
+          const recordsToUpdate = customers.filter(
+            c => c.id !== id && c.designer === designerName
+          );
+          
+          if (recordsToUpdate.length > 0) {
+            console.log(`找到 ${recordsToUpdate.length} 条需要更新电话的记录`);
+            
+            // 批量更新这些记录
+            const updatePromises = recordsToUpdate.map(customer => {
+              return customerApi.updateWithCache(customer.id, {
+                designer_phone: newPhone
+              });
+            });
+            
+            // 等待所有更新完成
+            await Promise.all(updatePromises);
+            
+            // 更新本地状态
+            setCustomers(prev => 
+              prev.map(customer => 
+                customer.designer === designerName
+                  ? { ...customer, designer_phone: newPhone }
+                  : customer
+              )
+            );
+            
+            setFilteredCustomers(prev => 
+              prev.map(customer => 
+                customer.designer === designerName
+                  ? { ...customer, designer_phone: newPhone }
+                  : customer
+              )
+            );
+            
+            message.success(`已自动更新所有"${designerName}"的电话号码`);
+          } else {
+            console.log('没有找到其他需要更新电话的相同设计师记录');
+          }
+        }
+      }
+      
+      // 如果编辑的是踏勘员电话，自动更新所有相同踏勘员名称的记录
+      if (dataIndex === 'surveyor_phone') {
+        const currentCustomer = customers.find(customer => customer.id === id);
+        if (currentCustomer && currentCustomer.surveyor && values.surveyor_phone) {
+          const surveyorName = currentCustomer.surveyor;
+          const newPhone = values.surveyor_phone;
+          console.log(`准备更新所有踏勘员 "${surveyorName}" 的电话为 ${newPhone}`);
+          
+          // 找到所有具有相同踏勘员名称的记录
+          const recordsToUpdate = customers.filter(
+            c => c.id !== id && c.surveyor === surveyorName
+          );
+          
+          if (recordsToUpdate.length > 0) {
+            console.log(`找到 ${recordsToUpdate.length} 条需要更新电话的记录`);
+            
+            // 批量更新这些记录
+            const updatePromises = recordsToUpdate.map(customer => {
+              return customerApi.updateWithCache(customer.id, {
+                surveyor_phone: newPhone
+              });
+            });
+            
+            // 等待所有更新完成
+            await Promise.all(updatePromises);
+            
+            // 更新本地状态
+            setCustomers(prev => 
+              prev.map(customer => 
+                customer.surveyor === surveyorName
+                  ? { ...customer, surveyor_phone: newPhone }
+                  : customer
+              )
+            );
+            
+            setFilteredCustomers(prev => 
+              prev.map(customer => 
+                customer.surveyor === surveyorName
+                  ? { ...customer, surveyor_phone: newPhone }
+                  : customer
+              )
+            );
+            
+            message.success(`已自动更新所有"${surveyorName}"的电话号码`);
+          } else {
+            console.log('没有找到其他需要更新电话的相同踏勘员记录');
+          }
+        }
+      }
+      
+      // 如果编辑的是业务员电话，自动更新所有相同业务员名称的记录
+      if (dataIndex === 'salesman_phone') {
+        const currentCustomer = customers.find(customer => customer.id === id);
+        if (currentCustomer && currentCustomer.salesman && values.salesman_phone) {
+          const salesmanName = currentCustomer.salesman;
+          const newPhone = values.salesman_phone;
+          console.log(`准备更新所有业务员 "${salesmanName}" 的电话为 ${newPhone}`);
+          
+          // 找到所有具有相同业务员名称的记录
+          const recordsToUpdate = customers.filter(
+            c => c.id !== id && c.salesman === salesmanName
+          );
+          
+          if (recordsToUpdate.length > 0) {
+            console.log(`找到 ${recordsToUpdate.length} 条需要更新电话的记录`);
+            
+            // 批量更新这些记录
+            const updatePromises = recordsToUpdate.map(customer => {
+              return customerApi.updateWithCache(customer.id, {
+                salesman_phone: newPhone
+              });
+            });
+            
+            // 等待所有更新完成
+            await Promise.all(updatePromises);
+            
+            // 更新本地状态
+            setCustomers(prev => 
+              prev.map(customer => 
+                customer.salesman === salesmanName
+                  ? { ...customer, salesman_phone: newPhone }
+                  : customer
+              )
+            );
+            
+            setFilteredCustomers(prev => 
+              prev.map(customer => 
+                customer.salesman === salesmanName
+                  ? { ...customer, salesman_phone: newPhone }
+                  : customer
+              )
+            );
+            
+            message.success(`已自动更新所有"${salesmanName}"的电话号码`);
+          } else {
+            console.log('没有找到其他需要更新电话的相同业务员记录');
+          }
+        }
+      }
+    } catch (error) {
+      console.error('保存编辑数据失败:', error);
+      message.error('保存失败，请重试');
+    }
+  };
+
+  // 修改可编辑日期单元格中的handleDateChange函数
+  const handleDateChange = async (date: any, record: Customer, dataIndex: string) => {
+    try {
+      if (!record.id) {
+        console.error('保存错误: 无效的记录ID');
+        message.error('保存失败: 记录标识无效');
+        return;
+      }
+      
+      // 准备更新数据
+      const dataToUpdate = {
+        [dataIndex]: date ? date.toISOString() : null
+      };
+      
+      // 使用数据缓存服务更新数据
+      const updatedCustomer = customerApi.updateWithCache(record.id, dataToUpdate);
+      
+      // 更新本地状态
+      setCustomers(prev => 
+        prev.map(customer => (customer.id === record.id ? { ...customer, ...updatedCustomer } : customer))
+      );
+      setFilteredCustomers(prev => 
+        prev.map(customer => (customer.id === record.id ? { ...customer, ...updatedCustomer } : customer))
+      );
+        
+        // 退出编辑状态
+      setEditingCell(null);
+      message.success('日期更新成功');
+    } catch (error) {
+      console.error('更新日期失败:', error);
+      message.error('更新失败');
+    }
+  };
+
+  // 删除客户
+  const handleDelete = (id: string, customerName: string) => {
+    confirm({
+      title: '确认删除',
+      content: `确定要删除客户 "${customerName}" 吗？此操作不可恢复！`,
+      okText: '确定',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          // 使用数据缓存服务删除客户
+          const success = await customerApi.deleteWithCache(id);
+          
+          if (success) {
+          // 更新本地状态
+          setCustomers(prev => prev.filter(customer => customer.id !== id));
+          setFilteredCustomers(prev => prev.filter(customer => customer.id !== id));
+          
+          message.success('客户删除成功');
+          } else {
+            message.error('删除客户失败，请刷新页面后重试');
+          }
+        } catch (error) {
+          message.error('删除客户失败，系统出现异常');
+          console.error('删除客户时发生错误:', error);
+        }
+      }
+    });
+  };
+
+  // 处理导出模态框
+  const showExportModal = () => {
+    setExportModalVisible(true);
+  };
+  
+  // 处理导出选项变更
+  const handleExportFieldChange = (fieldName: string, checked: boolean) => {
+    setExportFields(prev => ({
+      ...prev,
+      [fieldName]: checked
+    }));
+  };
+  
+  // 全选所有导出字段
+  const selectAllExportFields = () => {
+    const allFields = { ...exportFields };
+    Object.keys(allFields).forEach(field => {
+      allFields[field] = true;
+    });
+    setExportFields(allFields);
+  };
+  
+  // 取消全选导出字段
+  const deselectAllExportFields = () => {
+    const allFields = { ...exportFields };
+    Object.keys(allFields).forEach(field => {
+      allFields[field] = false;
+    });
+    // 至少保留客户姓名字段
+    allFields['客户姓名'] = true;
+    setExportFields(allFields);
+  };
+  
+  // 带选择字段的导出客户数据
+  const handleExportWithFields = () => {
+    setExportLoading(true);
+    try {
+      // 防止大数据量导出时阻塞UI
+      setTimeout(() => {
+        try {
+          // 获取用户选择的字段
+          const selectedFields = Object.keys(exportFields).filter(field => exportFields[field]);
+          
+      // 准备要导出的数据
+          const exportData = filteredCustomers.map(customer => {
+            const row: {[key: string]: any} = {};
+            
+            // 只添加用户选择的字段
+            if (exportFields['登记日期']) 
+              row['登记日期'] = customer.register_date && dayjs(customer.register_date).isValid() 
+                ? dayjs(customer.register_date).format('YYYY-MM-DD') 
+                : '';
+            if (exportFields['客户姓名'])
+              row['客户姓名'] = customer.customer_name || '';
+            if (exportFields['客户电话'])
+              row['客户电话'] = customer.phone || '';
+            if (exportFields['地址'])
+              row['地址'] = customer.address || '';
+            if (exportFields['身份证号'])
+              row['身份证号'] = customer.id_card || '';
+            if (exportFields['业务员'])
+              row['业务员'] = customer.salesman || '';
+            if (exportFields['业务员电话'])
+              row['业务员电话'] = customer.salesman_phone || '';
+            if (exportFields['业务员邮箱'])
+              row['业务员邮箱'] = customer.salesman_email || '';
+            if (exportFields['踏勘员'])
+              row['踏勘员'] = customer.surveyor || '';
+            if (exportFields['踏勘员电话'])
+              row['踏勘员电话'] = customer.surveyor_phone || '';
+            if (exportFields['踏勘员邮箱'])
+              row['踏勘员邮箱'] = customer.surveyor_email || '';
+            if (exportFields['补充资料'])
+              row['补充资料'] = Array.isArray(customer.station_management) 
+                ? customer.station_management.join('、') 
+                : (typeof customer.station_management === 'string' ? customer.station_management : '');
+            if (exportFields['备案日期']) {
+              // 处理备案日期格式
+              if (customer.filing_date && customer.filing_date !== '') {
+                if (dayjs(customer.filing_date).isValid()) {
+                  row['备案日期'] = dayjs(customer.filing_date).format('YYYY-MM-DD');
+                } else {
+                  row['备案日期'] = customer.filing_date; // 如果不是有效日期，直接使用原始值
+                }
+              } else {
+                row['备案日期'] = '';
+              }
+            }
+            if (exportFields['电表号码'])
+              row['电表号码'] = customer.meter_number || '';
+            if (exportFields['设计师'])
+              row['设计师'] = customer.designer || '';
+            if (exportFields['设计师电话'])
+              row['设计师电话'] = customer.designer_phone || '';
+            if (exportFields['图纸变更'])
+              row['图纸变更'] = customer.drawing_change || '未出图';
+            if (exportFields['催单']) {
+              if (customer.urge_order && dayjs(customer.urge_order).isValid()) {
+                row['催单'] = dayjs(customer.urge_order).format('YYYY-MM-DD HH:mm');
+              } else {
+                row['催单'] = '';
+              }
+            }
+            if (exportFields['容量(KW)'])
+              row['容量(KW)'] = customer.capacity || '';
+            if (exportFields['投资金额'])
+              row['投资金额'] = customer.investment_amount || '';
+            if (exportFields['用地面积(m²)'])
+              row['用地面积(m²)'] = customer.land_area || '';
+            if (exportFields['组件数量'])
+              row['组件数量'] = customer.module_count || '';
+            if (exportFields['逆变器'])
+              row['逆变器'] = customer.inverter || '';
+            if (exportFields['铜线'])
+              row['铜线'] = customer.copper_wire || '';
+            if (exportFields['铝线'])
+              row['铝线'] = customer.aluminum_wire || '';
+            if (exportFields['配电箱'])
+              row['配电箱'] = customer.distribution_box || '';
+            if (exportFields['方钢出库日期']) {
+              if (customer.square_steel_outbound_date === 'RETURNED') {
+                row['方钢出库日期'] = '退单';
+              } else if (customer.square_steel_outbound_date && dayjs(customer.square_steel_outbound_date).isValid()) {
+                row['方钢出库日期'] = dayjs(customer.square_steel_outbound_date).format('YYYY-MM-DD');
+              } else {
+                row['方钢出库日期'] = '';
+              }
+            }
+            if (exportFields['组件出库日期']) {
+              if (customer.component_outbound_date === 'RETURNED') {
+                row['组件出库日期'] = '退单';
+              } else if (customer.component_outbound_date && dayjs(customer.component_outbound_date).isValid()) {
+                row['组件出库日期'] = dayjs(customer.component_outbound_date).format('YYYY-MM-DD');
+              } else {
+                row['组件出库日期'] = '';
+              }
+            }
+            if (exportFields['派工日期']) {
+              if (customer.dispatch_date && dayjs(customer.dispatch_date).isValid()) {
+                row['派工日期'] = dayjs(customer.dispatch_date).format('YYYY-MM-DD');
+              } else {
+                row['派工日期'] = '';
+              }
+            }
+            if (exportFields['施工队'])
+              row['施工队'] = customer.construction_team || '';
+            if (exportFields['施工队电话'])
+              row['施工队电话'] = customer.construction_team_phone || '';
+            if (exportFields['施工状态']) {
+              if (customer.construction_status && dayjs(customer.construction_status).isValid()) {
+                row['施工状态'] = dayjs(customer.construction_status).format('YYYY-MM-DD');
+              } else {
+                row['施工状态'] = '';
+              }
+            }
+            if (exportFields['大线'])
+              row['大线'] = customer.main_line || '';
+            if (exportFields['技术审核']) {
+              // 技术审核特殊处理
+              if (customer.technical_review_status === 'approved') {
+                row['技术审核'] = customer.technical_review && dayjs(customer.technical_review).isValid() 
+                  ? dayjs(customer.technical_review).format('YYYY-MM-DD HH:mm') 
+                  : '已通过';
+              } else if (customer.technical_review_status === 'rejected') {
+                row['技术审核'] = '已拒绝';
+              } else if (customer.technical_review && dayjs(customer.technical_review).isValid()) {
+                row['技术审核'] = dayjs(customer.technical_review).format('YYYY-MM-DD HH:mm');
+              } else {
+                row['技术审核'] = '';
+              }
+            }
+            if (exportFields['上传国网']) {
+              if (customer.upload_to_grid && dayjs(customer.upload_to_grid).isValid()) {
+                row['上传国网'] = dayjs(customer.upload_to_grid).format('YYYY-MM-DD HH:mm');
+              } else {
+                row['上传国网'] = '';
+              }
+            }
+            if (exportFields['建设验收']) {
+              // 建设验收简化处理
+              if (customer.construction_acceptance_date && dayjs(customer.construction_acceptance_date).isValid()) {
+                row['建设验收'] = dayjs(customer.construction_acceptance_date).format('YYYY-MM-DD HH:mm');
+              } else {
+                row['建设验收'] = '未推到';
+              }
+            }
+            if (exportFields['挂表日期']) {
+              if (customer.meter_installation_date && dayjs(customer.meter_installation_date).isValid()) {
+                row['挂表日期'] = dayjs(customer.meter_installation_date).format('YYYY-MM-DD HH:mm');
+              } else {
+                row['挂表日期'] = '';
+              }
+            }
+            if (exportFields['购售电合同']) {
+              if (customer.power_purchase_contract && dayjs(customer.power_purchase_contract).isValid()) {
+                row['购售电合同'] = dayjs(customer.power_purchase_contract).format('YYYY-MM-DD HH:mm');
+              } else {
+                row['购售电合同'] = '';
+              }
+            }
+            if (exportFields['状态'])
+              row['状态'] = customer.status || '';
+            if (exportFields['价格'])
+              row['价格'] = customer.price || '';
+            if (exportFields['公司'])
+              row['公司'] = customer.company === 'haoChen' ? '昊尘' : (customer.company === 'youZhi' ? '祐之' : customer.company || '');
+            if (exportFields['备注'])
+              row['备注'] = customer.remarks || '';
+            if (exportFields['创建时间']) {
+              if (customer.created_at && dayjs(customer.created_at).isValid()) {
+                row['创建时间'] = dayjs(customer.created_at).format('YYYY-MM-DD HH:mm:ss');
+              } else {
+                row['创建时间'] = '';
+              }
+            }
+            if (exportFields['最后更新']) {
+              if (customer.updated_at && dayjs(customer.updated_at).isValid()) {
+                row['最后更新'] = dayjs(customer.updated_at).format('YYYY-MM-DD HH:mm:ss');
+              } else {
+                row['最后更新'] = '';
+              }
+            }
+            
+            return row;
+          });
+
+          // 添加工作表样式
+          const workbook = XLSX.utils.book_new();
+          const worksheet = XLSX.utils.json_to_sheet(exportData);
+          
+          // 设置列宽（自动调整为内容宽度）
+          const colWidths = [];
+          for (const key in exportData[0]) {
+            let maxWidth = key.length * 2; // 标题宽度
+            for (const row of exportData) {
+              const cellValue = row[key] ? String(row[key]) : '';
+              maxWidth = Math.max(maxWidth, cellValue.length * 1.5);
+            }
+            colWidths.push({ width: Math.min(60, maxWidth) }); // 最大宽度限制为60
+          }
+          worksheet['!cols'] = colWidths;
+          
+          // 添加表头样式
+          const headerRange = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+          for (let col = headerRange.s.c; col <= headerRange.e.c; col++) {
+            const cellRef = XLSX.utils.encode_cell({ r: 0, c: col });
+            if (!worksheet[cellRef]) continue;
+            
+            worksheet[cellRef].s = {
+              font: { bold: true },
+              fill: { fgColor: { rgb: "EFEFEF" } },
+              alignment: { horizontal: 'center', vertical: 'center' }
+            };
+          }
+
+      // 将工作表添加到工作簿
+          XLSX.utils.book_append_sheet(workbook, worksheet, '客户数据');
+
+          // 生成文件名（包含搜索条件）
+          let fileName = `客户数据_${dayjs().format('YYYY-MM-DD_HH-mm')}`;
+          if (searchText) {
+            fileName += `_搜索_${searchText.substring(0, 10)}`;
+          }
+          fileName += '.xlsx';
+
+      // 保存文件
+          XLSX.writeFile(workbook, fileName);
+          
+          // 显示成功消息
+          message.success(`成功导出 ${exportData.length} 条数据`);
+          
+          // 关闭导出模态框
+          setExportModalVisible(false);
+    } catch (error) {
+          console.error('导出数据时出错:', error);
+          message.error('导出失败: ' + (error instanceof Error ? error.message : '未知错误'));
+        } finally {
+          setExportLoading(false);
+        }
+      }, 100);
+    } catch (error) {
+      message.error('导出准备失败');
+      console.error(error);
+      setExportLoading(false);
+    }
+  };
+
+  // 处理导入配置
+  const uploadProps: UploadProps = {
+    name: 'file',
+    multiple: false,
+    accept: '.csv,.xlsx,.xls',
+    showUploadList: false,
+    beforeUpload: (file) => {
+      // 验证文件类型
+      const isValidFileType = file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || 
+                             file.type === 'application/vnd.ms-excel' || 
+                             file.name.endsWith('.csv')
+      if (!isValidFileType) {
+        message.error('请上传Excel或CSV文件！')
+        return Upload.LIST_IGNORE
+      }
+      
+      // 处理文件上传
+      setImportLoading(true)
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        try {
+          const data = new Uint8Array(e.target?.result as ArrayBuffer)
+          const workbook = XLSX.read(data, { type: 'array' })
+          const firstSheetName = workbook.SheetNames[0]
+          const worksheet = workbook.Sheets[firstSheetName]
+          const jsonData = XLSX.utils.sheet_to_json(worksheet)
+          
+          // 导入数据
+          handleImportData(jsonData)
+        } catch (error) {
+          message.error('解析文件失败')
+          console.error(error)
+          setImportLoading(false)
+        }
+      }
+      reader.readAsArrayBuffer(file)
+      return false // 阻止默认上传行为
+    }
+  }
+
+  // 处理导入数据
+  const handleImportData = async (data: any[]) => {
+    try {
+      // 准备导入结果
+      const result: ImportResult = {
+        total: data.length,
+        success: 0,
+        duplicate: 0,
+        failed: 0,
+        failedItems: []
+      }
+
+      // 处理每条数据
+      for (let i = 0; i < data.length; i++) {
+        const row = data[i]
+        
+        // 验证必填字段
+        const missingFields = []
+        if (!row['客户姓名']) missingFields.push('客户姓名')
+        // 移除客户电话必填验证
+        if (!row['地址']) missingFields.push('地址')
+        if (!row['身份证号']) missingFields.push('身份证号')
+        if (!row['业务员']) missingFields.push('业务员')
+        
+        if (missingFields.length > 0) {
+          result.failed++
+          result.failedItems?.push({
+            row: i + 2, // Excel从1开始，标题行占1行
+            reason: `缺少必填字段（${missingFields.join('、')}）`
+          })
+          continue
+        }
+
+        // 准备客户数据
+        const customerData: Partial<Customer> = {
+          register_date: row['登记日期'] ? dayjs(row['登记日期']).format() : new Date().toISOString(),
+          customer_name: row['客户姓名'],
+          phone: row['客户电话'] || '', // 允许电话为空
+          address: row['地址'] || '',
+          id_card: row['身份证号'] || '',
+          salesman: row['业务员'] || '',
+          salesman_phone: row['业务员电话'] || '',
+          filing_date: row['备案日期'] ? row['备案日期'] : null, // 直接使用原始值，不转换
+          meter_number: row['电表号码'] || '',
+          designer: row['设计师'] || '',
+          module_count: row['组件数量'] ? parseInt(row['组件数量']) : null, // 允许组件数量为空
+          status: row['状态'] || '待处理',
+          company: row['公司'] === '昊尘' ? 'haoChen' : (row['公司'] === '祐之' ? 'youZhi' : 'haoChen') // 默认为昊尘
+        }
+        
+        // 计算相关字段
+        if (customerData.module_count && customerData.module_count > 0) {
+          const calculatedFields = calculateAllFields(customerData.module_count)
+          Object.assign(customerData, calculatedFields)
+        }
+        
+        try {
+          // 尝试创建客户
+          await customerApi.create(customerData as any)
+          result.success++
+        } catch (error: any) {
+          // 处理重复客户
+          if (error.code === '23505') {
+            result.duplicate++
+          } else {
+            result.failed++
+            let errorMessage = '未知错误'
+            
+            // 提取更详细的错误信息
+            if (error.message) {
+              if (error.message.includes('duplicate key')) {
+                errorMessage = '客户数据重复'
+              } else if (error.message.includes('violates not-null')) {
+                // 提取具体的字段名称
+                const fieldMatch = error.message.match(/column "([^"]+)"/) 
+                const fieldName = fieldMatch ? fieldMatch[1] : '未知字段'
+                errorMessage = `缺少必填字段 (${fieldName})` 
+              } else if (error.message.includes('invalid input syntax')) {
+                errorMessage = '数据格式错误'
+              } else {
+                errorMessage = error.message
+              }
+            }
+            
+            console.error('导入失败详情:', error)
+            
+            result.failedItems?.push({
+              row: i + 2,
+              reason: `导入失败: ${errorMessage}`
+            })
+          }
+        }
+      }
+      
+      // 更新导入结果
+      setImportResult(result)
+      
+      // 刷新客户列表
+      if (result.success > 0) {
+        fetchCustomers()
+      }
+    } catch (error) {
+      message.error('导入失败')
+      console.error(error)
+    } finally {
+      setImportLoading(false)
+    }
+  }
+
+  // 获取修改记录
+  const fetchModificationRecords = async () => {
+    try {
+      const records = await customerApi.getModificationRecords()
+      setModificationRecords(records)
+    } catch (error) {
+      console.error('获取修改记录失败:', error)
+      message.error('获取修改记录失败')
+    }
+  }
+
+  // 显示修改记录抽屉
+  const showModificationDrawer = () => {
+    fetchModificationRecords()
+    setModificationDrawerVisible(true)
+  }
+
+  // 可编辑单元格组件
+  const EditableCell = React.memo(({ value, record, dataIndex, title, required = true }: { value: any; record: Customer; dataIndex: string; title: string; required?: boolean }) => {
+    const editable = isEditing(record, dataIndex);
+    const [hover, setHover] = useState(false);
+    
+    return editable ? (
+      <Form.Item
+        name={dataIndex}
+        style={{ margin: 0 }}
+        rules={required ? [{ required: true, message: `请输入${title}` }] : []}
+      >
+        <Input 
+          onPressEnter={() => record.id && saveEditedCell(record.id)} 
+          placeholder={required ? `请输入${title}` : `${title}(可选)`}
+          autoFocus
+          onBlur={() => record.id && saveEditedCell(record.id)}
+          allowClear={!required}
+        />
+      </Form.Item>
+    ) : (
+      <div 
+        style={{ 
+          display: 'flex', 
+          alignItems: 'center',
+          padding: '4px 0',
+          borderRadius: 4,
+          cursor: editingCell === null ? 'pointer' : 'default',
+          background: hover ? '#f0f5ff' : 'transparent'
+        }}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        onClick={() => editingCell === null && edit(record, dataIndex)}
+      >
+        <div style={{ flex: 1 }}>
+          {value ? (
+            <span>{value}</span>
+          ) : (
+            <span style={{ color: '#999' }}>-</span>
+          )}
+        </div>
+        {hover && editingCell === null && (
+          <Button 
+            type="text" 
+            size="small"
+            icon={<EditOutlined />}
+            onClick={(e) => {
+              e.stopPropagation();
+              edit(record, dataIndex);
+            }}
+            style={{ padding: '0 4px' }}
+            title={`编辑${title}`}
+          />
+        )}
+      </div>
+    );
+  }, (prevProps, nextProps) => {
+    // 仅在以下情况重新渲染:
+    // 1. 值变化
+    // 2. 编辑状态变化 (从查看切换到编辑，或者从编辑切换到查看)
+    const valueChanged = prevProps.value !== nextProps.value;
+    const wasEditing = isEditing(prevProps.record, prevProps.dataIndex);
+    const isEditingNow = isEditing(nextProps.record, nextProps.dataIndex);
+    const editingStateChanged = wasEditing !== isEditingNow;
+    
+    return !(valueChanged || editingStateChanged);
+  });
+
+  // 添加可编辑下拉单元格组件
+  const EditableSelectCell = React.memo(({ value, record, dataIndex, title, options }: { 
+    value: any; 
+    record: Customer; 
+    dataIndex: string; 
+    title: string; 
+    options: {value: string, label: string, phone?: string}[] 
+  }) => {
+    const editable = isEditing(record, dataIndex);
+    const [hover, setHover] = useState(false);
+    
+    return editable ? (
+      <Form.Item
+        name={dataIndex}
+        style={{ margin: 0 }}
+        rules={[{ 
+          required: dataIndex !== 'salesman' && dataIndex !== 'designer' && dataIndex !== 'surveyor' && dataIndex !== 'construction_team', 
+          message: `请选择或输入${title}` 
+        }]}
+      >
+        <Select
+          placeholder={`请选择或输入${title}`}
+          autoFocus
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          options={options}
+          filterOption={(input, option) => 
+            (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+          }
+          style={{ width: '100%' }}
+          dropdownStyle={{ maxHeight: 400, overflow: 'auto' }}
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { Table, Button, Input, Space, message, Modal, Tag, Tooltip, Typography, Upload, Drawer, Divider, Select, DatePicker, Form, Radio, InputNumber, Dropdown, Menu, AutoComplete, Checkbox, Row, Col } from 'antd'
+import { 
+  PlusOutlined, 
+  SearchOutlined, 
+  ExportOutlined, 
+  EditOutlined, 
+  DeleteOutlined, 
+  ImportOutlined, 
+  ClockCircleOutlined,
+  FileExcelOutlined,
+  CloseCircleOutlined,
+  CheckCircleOutlined,
+  RollbackOutlined,
+  DownOutlined,
+  LoadingOutlined
+} from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
+import { customerApi, constructionTeamApi, surveyorApi, dataCacheService } from '../services/api'
+import { Customer, ImportResult } from '../types'
+import * as XLSX from 'xlsx'
+import { useAuth } from '../contexts/AuthContext'
+import dayjs from 'dayjs'
+import type { UploadProps } from 'antd'
+import type { ColumnsType, ColumnType } from 'antd/es/table'
+import { calculateAllFields } from '../utils/calculationUtils'
+import Draggable from 'react-draggable'
+import { supabase } from '../services/supabase';
+import { updateConstructionAcceptance } from '../services/api_fix'
+
+const { Title } = Typography
+const { confirm } = Modal
+const { Dragger } = Upload
+const { RangePicker } = DatePicker
+
+// 扩展Window接口，添加scrollTimer属性
+declare global {
+  interface Window {
+    scrollTimer: ReturnType<typeof setTimeout> | null;
+  }
+}
+
+// 手动定义OutboundStatus类型
+type OutboundStatus = 'none' | 'outbound' | 'inbound' | 'returned';
+
+const CustomerList = () => {
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [filteredCustomers, setFilteredCustomers] = useState<Customer[]>([])
+  const [loading, setLoading] = useState(true)
+  const [searchText, setSearchText] = useState('')
+  const [importModalVisible, setImportModalVisible] = useState(false)
+  const [importResult, setImportResult] = useState<ImportResult | null>(null)
+  const [importLoading, setImportLoading] = useState(false)
+  const [modificationDrawerVisible, setModificationDrawerVisible] = useState(false)
+  const [modificationRecords, setModificationRecords] = useState<any[]>([])
+  const [editingCell, setEditingCell] = useState<{id: string, dataIndex: string} | null>(null)
+  const [salesmenList, setSalesmenList] = useState<{name: string, phone: string}[]>([])
+  const [editForm] = Form.useForm()
+  const navigate = useNavigate()
+  const { userRole } = useAuth()
+  // 添加分页相关状态
+  const [pageSize, setPageSize] = useState<number>(100)
+  const [currentPage, setCurrentPage] = useState<number>(1)
+  const [totalPages, setTotalPages] = useState<number>(1)
+  // 添加缓存页面数据的状态
+  const [cachedPageData, setCachedPageData] = useState<{[key: number]: Customer[]}>({})
+  // 添加是否正在后台加载数据的状态
+  const [isBackgroundLoading, setIsBackgroundLoading] = useState(false)
+  // 添加上一次的页面大小
+  const [previousPageSize, setPreviousPageSize] = useState<number>(100)
+  // 添加用于存储预渲染数据的状态
+  const [preRenderedData, setPreRenderedData] = useState<Customer[]>([])
+  // 用于控制编辑时的性能优化
+  const editingRef = useRef<boolean>(false)
+  
+  // 添加高级搜索相关状态
+  const [advancedSearchVisible, setAdvancedSearchVisible] = useState(false)
+  const [searchFields, setSearchFields] = useState<{[key: string]: boolean}>({
+    customer_name: true,
+    phone: true,
+    address: true,
+    salesman: true,
+    id_card: true,
+    meter_number: true,
+    designer: true,
+    surveyor: true,
+    construction_team: true,
+    remarks: false,
+  })
+  
+  // 高级搜索字段名称映射
+  const fieldNameMap: {[key: string]: string} = {
+    customer_name: '客户姓名',
+    phone: '客户电话',
+    address: '客户地址',
+    salesman: '业务员',
+    id_card: '身份证号',
+    meter_number: '电表号码',
+    designer: '设计师',
+    surveyor: '踏勘员',
+    construction_team: '施工队',
+    remarks: '备注',
+  }
+  
+  // 限制每次最大加载记录数以提高性能
+  const MAX_RECORDS_PER_LOAD = 5000; // 增加到5000，确保能加载所有数据
+  // 添加虚拟滚动页大小常量
+  const VIRTUAL_PAGE_SIZE = 100; // 在大页面模式下使用虚拟滚动分页
+  
+  const STATION_MANAGEMENT_OPTIONS = [
+    { value: '房产证', label: '房产证', color: 'blue' },
+    { value: '授权书', label: '授权书', color: 'purple' },
+    { value: '银行卡', label: '银行卡', color: 'cyan' },
+    { value: '航拍', label: '航拍', color: 'green' },
+    { value: '结构照', label: '结构照', color: 'magenta' },
+    { value: '门头照', label: '门头照', color: 'orange' },
+    { value: '合同', label: '合同', color: 'red' },
+    { value: '日期', label: '日期', color: 'cyan' }
+  ];
+
+  // 定义图纸变更选项
+  const DRAWING_CHANGE_OPTIONS = [
+    { value: '未出图', label: '未出图', color: 'default' },
+    { value: '已出图', label: '已出图', color: 'green' },
+    { value: '变更1', label: '变更1', color: 'blue' },
+    { value: '变更2', label: '变更2', color: 'purple' },
+    { value: '变更3', label: '变更3', color: 'orange' },
+    { value: '变更4', label: '变更4', color: 'red' },
+    { value: '变更5', label: '变更5', color: 'volcano' },
+  ];
+
+  const [constructionTeams, setConstructionTeams] = useState<{name: string, phone: string}[]>([]);
+  const [surveyors, setSurveyors] = useState<{ name: string; phone: string }[]>([])
+
+  // 设计师选项
+  const [designers, setDesigners] = useState<{name: string, phone: string}[]>([]);
+
+  // 在组件开始处添加状态
+  const [exportModalVisible, setExportModalVisible] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportFields, setExportFields] = useState<{[key: string]: boolean}>({
+    '登记日期': true,
+    '客户姓名': true,
+    '客户电话': true,
+    '地址': true,
+    '身份证号': true,
+    '业务员': true,
+    '业务员电话': true,
+    '业务员邮箱': false,
+    '踏勘员': true,
+    '踏勘员电话': true,
+    '踏勘员邮箱': false,
+    '补充资料': true,
+    '备案日期': true,
+    '电表号码': true,
+    '设计师': true,
+    '设计师电话': true,
+    '图纸变更': true,
+    '催单': true,
+    '容量(KW)': true,
+    '投资金额': true,
+    '用地面积(m²)': true,
+    '组件数量': true,
+    '逆变器': true,
+    '铜线': true,
+    '铝线': true,
+    '配电箱': true,
+    '方钢出库日期': true,
+    '组件出库日期': true,
+    '派工日期': true,
+    '施工队': true,
+    '施工队电话': true,
+    '施工状态': true,
+    '大线': true,
+    '技术审核': true,
+    '上传国网': true,
+    '建设验收': true,
+    '挂表日期': true,
+    '购售电合同': true,
+    '状态': true,
+    '价格': true,
+    '公司': true,
+    '备注': true,
+    '创建时间': false,
+    '最后更新': false,
+  });
+
+  // 添加日期筛选相关状态
+  const [registerDateRange, setRegisterDateRange] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null] | null>(null);
+  const [filingDateRange, setFilingDateRange] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null] | null>(null);
+
+  useEffect(() => {
+    fetchCustomers()
+    fetchConstructionTeams()
+    fetchSurveyors()
+    fetchDesigners()
+  }, [])
+
+  // 获取所有客户数据
+  const fetchCustomers = async () => {
+      setLoading(true)
+    try {
+      console.log('开始获取所有客户数据...');
+      // 获取所有客户
+      const data = await customerApi.getAll()
+      console.log(`成功获取到 ${data.length} 条客户数据`);
+      
+      // 先从客户数据中提取业务员信息
+      const salesmen = new Map<string, string>();
+      data.forEach(customer => {
+        if (customer.salesman && customer.salesman.trim() !== '') {
+          salesmen.set(customer.salesman, customer.salesman_phone || '');
+        }
+      });
+      
+      // 从user_roles表获取业务员信息
+      try {
+        const { data: salesmenData, error } = await supabase
+          .from('user_roles')
+          .select('name, phone, email, user_id')
+          .eq('role', 'salesman');
+        
+        if (error) throw error;
+        
+        // 将从user_roles表获取的业务员信息合并到映射中
+        if (salesmenData) {
+          salesmenData.forEach(salesman => {
+            if (salesman.name && salesman.name.trim() !== '') {
+              // 只有当salesmen中不存在此业务员或电话为空时才更新
+              if (!salesmen.has(salesman.name) || !salesmen.get(salesman.name)) {
+                salesmen.set(salesman.name, salesman.phone || '');
+              }
+            }
+          });
+        }
+      } catch (error) {
+        console.error('获取业务员信息失败:', error);
+      }
+      
+      // 转换为数组并更新业务员列表
+      const salesmenArray = Array.from(salesmen).map(([name, phone]) => ({
+        name,
+        phone
+      }));
+      
+      // 更新业务员列表
+      setSalesmenList(salesmenArray);
+      
+      // 分批处理数据以避免UI卡顿
+      const processData = (startIndex = 0, batchSize = MAX_RECORDS_PER_LOAD) => {
+        const endIndex = Math.min(startIndex + batchSize, data.length);
+        const batch = data.slice(startIndex, endIndex);
+        
+        // 处理当前批次
+        const processedBatch = batch.map(customer => {
+                let processedCustomer = { ...customer };
+                if (customer.module_count && customer.module_count > 0) {
+                  const calculatedFields = calculateAllFields(customer.module_count);
+                  processedCustomer = {
+                    ...processedCustomer,
+                    ...calculatedFields
+                  };
+                }
+                return processedCustomer;
+              });
+              
+        // 更新状态，保留之前处理的数据
+        setCustomers(prev => [...prev, ...processedBatch]);
+        setFilteredCustomers(prev => [...prev, ...processedBatch]);
+            
+        // 检查是否还有更多数据需要处理
+        if (endIndex < data.length) {
+          // 使用setTimeout避免阻塞UI
+          setTimeout(() => {
+            processData(endIndex, batchSize);
+          }, 0);
+        } else {
+          // 所有数据处理完成
+          console.log('所有客户数据处理完成');
+          setTotalPages(Math.ceil(data.length / pageSize)); // 更新总页数
+          setLoading(false);
+        }
+      };
+      
+      // 重置状态并开始处理第一批数据
+      setCustomers([]);
+      setFilteredCustomers([]);
+      processData(0, MAX_RECORDS_PER_LOAD);
+      
+    } catch (error) {
+      message.error('获取客户数据失败')
+      console.error(error)
+      setLoading(false)
+    }
+  };
+
+  // 获取施工队列表
+  const fetchConstructionTeams = async () => {
+    try {
+      console.log('开始获取施工队数据...');
+      
+      // 使用新的getAll方法获取所有来源的施工队数据
+      const teamList = await constructionTeamApi.getAll();
+      console.log('获取到的施工队数据:', teamList);
+      
+      if (teamList && teamList.length > 0) {
+        setConstructionTeams(teamList);
+        return;
+      }
+      
+      // 如果getAll仍然获取不到数据，使用空列表
+      console.log('无法获取施工队数据，使用空列表');
+      setConstructionTeams([]);
+    } catch (error) {
+      console.error('获取施工队列表失败:', error);
+      message.error('获取施工队列表失败');
+      
+      // 发生错误时使用空数组
+      setConstructionTeams([]);
+    }
+  };
+
+  // 获取踏勘员列表
+  const fetchSurveyors = async () => {
+    try {
+      console.log('开始获取踏勘员数据...');
+      
+      // 使用新的getAll方法获取所有来源的踏勘员数据
+      const surveyorList = await surveyorApi.getAll();
+      console.log('获取到的踏勘员数据:', surveyorList);
+      
+      if (surveyorList && surveyorList.length > 0) {
+        setSurveyors(surveyorList);
+        return;
+      }
+      
+      // 如果getAll仍然获取不到数据，回退到从customers表中查询（这是一个额外的保障）
+      console.log('无法获取踏勘员数据，使用空列表');
+      setSurveyors([]);
+    } catch (error) {
+      console.error('获取踏勘员列表失败:', error);
+      message.error('获取踏勘员列表失败');
+      
+      // 发生错误时使用空数组
+      setSurveyors([]);
+    }
+  };
+
+  // 获取设计师信息
+  const fetchDesigners = async () => {
+    try {
+      // 从客户表中提取唯一的设计师及其电话
+      const { data, error } = await supabase
+        .from('customers')
+        .select('designer, designer_phone')
+        .not('designer', 'is', null)
+        .not('designer', 'eq', '')
+        .order('designer', { ascending: true });
+
+      if (error) {
+        console.error('获取设计师数据失败:', error);
+        return;
+      }
+      
+      // 去重合并设计师信息
+      const uniqueDesigners = new Map();
+      data.forEach(item => {
+        if (item.designer && !uniqueDesigners.has(item.designer)) {
+          uniqueDesigners.set(item.designer, {
+            name: item.designer,
+            phone: item.designer_phone || ''
+          });
+        }
+      });
+
+      setDesigners(Array.from(uniqueDesigners.values()));
+    } catch (err) {
+      console.error('获取设计师数据时出错:', err);
+    }
+  };
+
+  // 优化的搜索函数
+  const performSearch = (value: string) => {
+    const isSearching = true;
+    
+    try {
+      const trimmed = value.trim();
+      
+      // 检查是否有任何筛选条件
+      if (trimmed === '' && !registerDateRange && !filingDateRange) {
+        // 如果没有搜索关键词和日期筛选，恢复全部数据
+        setFilteredCustomers(customers);
+        setTotalPages(Math.ceil(customers.length / pageSize));
+        setCurrentPage(1); // 重置到第一页
+        return;
+      }
+      
+      // 先按日期范围筛选客户
+      let dateFilteredCustomers = [...customers];
+      
+      // 按登记日期筛选
+      if (registerDateRange && registerDateRange[0] && registerDateRange[1]) {
+        const startDate = registerDateRange[0].startOf('day');
+        const endDate = registerDateRange[1].endOf('day');
+        
+        dateFilteredCustomers = dateFilteredCustomers.filter(customer => {
+          if (!customer.register_date) return false;
+          const customerDate = dayjs(customer.register_date);
+          return customerDate.isAfter(startDate) && customerDate.isBefore(endDate);
+        });
+      }
+      
+      // 按备案日期筛选
+      if (filingDateRange && filingDateRange[0] && filingDateRange[1]) {
+        const startDate = filingDateRange[0].startOf('day');
+        const endDate = filingDateRange[1].endOf('day');
+        
+        dateFilteredCustomers = dateFilteredCustomers.filter(customer => {
+          if (!customer.filing_date) return false;
+          const customerDate = dayjs(customer.filing_date);
+          return customerDate.isAfter(startDate) && customerDate.isBefore(endDate);
+        });
+      }
+      
+      // 如果没有搜索关键词，只进行日期筛选
+      if (trimmed === '') {
+        setFilteredCustomers(dateFilteredCustomers);
+        setTotalPages(Math.ceil(dateFilteredCustomers.length / pageSize));
+        setCurrentPage(1); // 重置到第一页
+        return;
+      }
+      
+      // 支持空格或逗号分隔的多关键词搜索
+      const keywords = trimmed.split(/[\s,，]+/)
+        .filter(keyword => keyword.trim() !== ''); // 过滤掉空字符串
+      
+      if (keywords.length === 0) {
+        setFilteredCustomers(dateFilteredCustomers);
+        setTotalPages(Math.ceil(dateFilteredCustomers.length / pageSize));
+        setCurrentPage(1); // 重置到第一页
+        return;
+      }
+      
+      // 获取启用的搜索字段
+      const enabledFields = Object.entries(searchFields)
+        .filter(([_, enabled]) => enabled)
+        .map(([field]) => field);
+      
+      // 如果没有启用任何字段，使用默认字段
+      if (enabledFields.length === 0) {
+        enabledFields.push('customer_name', 'phone', 'address', 'salesman', 'id_card', 'meter_number');
+      }
+      
+      // 在日期筛选结果的基础上进行关键词筛选
+      const filtered = dateFilteredCustomers.filter(customer => {
+        // 检查启用的每个字段
+        return keywords.some(keyword => 
+          enabledFields.some(field => {
+            const fieldValue = ((customer as any)[field] || '').toString().toLowerCase();
+            return fieldValue.includes(keyword.toLowerCase());
+          })
+        );
+      });
+      
+      setFilteredCustomers(filtered);
+      setTotalPages(Math.ceil(filtered.length / pageSize));
+      setCurrentPage(1); // 重置到第一页
+    } catch (error) {
+      console.error('搜索出错:', error);
+      message.error('搜索过程中出现错误');
+    }
+  };
+  
+  // 处理日期范围变化
+  const handleRegisterDateChange = (dates: [dayjs.Dayjs | null, dayjs.Dayjs | null] | null) => {
+    setRegisterDateRange(dates);
+  };
+  
+  const handleFilingDateChange = (dates: [dayjs.Dayjs | null, dayjs.Dayjs | null] | null) => {
+    setFilingDateRange(dates);
+  };
+  
+  // 清除所有筛选条件
+  const clearAllFilters = () => {
+    setRegisterDateRange(null);
+    setFilingDateRange(null);
+    setSearchText('');
+    performSearch('');
+  };
+  
+  // 添加日期筛选组件
+  const renderDateFilters = () => (
+    <div style={{ marginBottom: 16, backgroundColor: '#f5f5f5', padding: 12, borderRadius: 4 }}>
+      <Row gutter={[16, 8]} align="middle">
+        <Col xs={24} sm={24} md={7} lg={7} xl={7}>
+          <Space>
+            <span style={{ whiteSpace: 'nowrap' }}>登记日期:</span>
+            <RangePicker 
+              value={registerDateRange} 
+              onChange={handleRegisterDateChange} 
+              style={{ width: '100%' }}
+              allowClear={true}
+            />
+          </Space>
+        </Col>
+        <Col xs={24} sm={24} md={7} lg={7} xl={7}>
+          <Space>
+            <span style={{ whiteSpace: 'nowrap' }}>备案日期:</span>
+            <RangePicker 
+              value={filingDateRange} 
+              onChange={handleFilingDateChange} 
+              style={{ width: '100%' }}
+              allowClear={true}
             />
           </Space>
         </Col>
@@ -4982,7 +6708,6 @@ const CustomerList = () => {
 
   return (
     <div className="customer-list-container" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {renderDateFilters()}
       {renderTitleBar()}
       
       <Form form={editForm} style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -4996,47 +6721,6 @@ const CustomerList = () => {
             size="small"
             bordered
             pagination={false}
-            onChange={(_, __, sorter) => {
-              // 处理排序
-              if (sorter && 'field' in sorter && 'order' in sorter) {
-                const field = sorter.field as string;
-                const order = sorter.order;
-                
-                if (field && order) {
-                  // 对所有filteredCustomers进行排序而不只是当前页
-                  const sortedCustomers = [...filteredCustomers].sort((a, b) => {
-                    const aVal = a[field as keyof Customer];
-                    const bVal = b[field as keyof Customer];
-                    
-                    // 日期类型处理
-                    if (field.includes('date') || field.includes('_at')) {
-                      const aTime = aVal ? new Date(aVal).getTime() : 0;
-                      const bTime = bVal ? new Date(bVal).getTime() : 0;
-                      return order === 'ascend' ? aTime - bTime : bTime - aTime;
-                    }
-                    
-                    // 数字类型处理
-                    if (typeof aVal === 'number' && typeof bVal === 'number') {
-                      return order === 'ascend' ? aVal - bVal : bVal - aVal;
-                    }
-                    
-                    // 字符串类型处理
-                    const aStr = String(aVal || '');
-                    const bStr = String(bVal || '');
-                    return order === 'ascend' ? aStr.localeCompare(bStr) : bStr.localeCompare(aStr);
-                  });
-                  
-                  // 更新状态
-                  setFilteredCustomers(sortedCustomers);
-                  
-                  // 更新页面缓存
-                  populatePageCache(sortedCustomers, pageSize);
-                  
-                  // 重置到第一页
-                  setCurrentPage(1);
-                }
-              }
-            }}
             // 为所有页面添加垂直滚动配置
             scroll={{ y: 'calc(100vh - 280px)', x: 'max-content' }}
             // 大页码时启用虚拟滚动优化
