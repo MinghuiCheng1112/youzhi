@@ -5010,8 +5010,9 @@ const CustomerList = () => {
                     
                     // 日期类型处理
                     if (field.includes('date') || field.includes('_at')) {
-                      const aTime = aVal ? new Date(aVal).getTime() : 0;
-                      const bTime = bVal ? new Date(bVal).getTime() : 0;
+                      // 使用类型断言将值转换为字符串，避免类型错误
+                      const aTime = aVal ? new Date(String(aVal)).getTime() : 0;
+                      const bTime = bVal ? new Date(String(bVal)).getTime() : 0;
                       return order === 'ascend' ? aTime - bTime : bTime - aTime;
                     }
                     
