@@ -14,7 +14,9 @@
     "preview": "vite preview",
     "test": "vitest",
     "auto-dispatch": "node --experimental-modules scripts/auto_dispatch_date.js",
-    "cleanup-db": "node scripts/run_cleanup.js"
+    "cleanup-db": "node scripts/run_cleanup.js",
+    "apply-procurement-migrations": "node scripts/apply_procurement_migrations.js",
+    "fix-materials": "node scripts/fix_materials_order.js"
   },
   "dependencies": {
     "@ant-design/charts": "^2.2.1",
