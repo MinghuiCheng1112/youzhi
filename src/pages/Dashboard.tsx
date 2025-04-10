@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
-import { Card, Row, Col, Statistic, Spin, Typography } from 'antd'
+import { Card, Row, Col, Statistic, Spin, Typography, DatePicker, ConfigProvider } from 'antd'
 import { TeamOutlined, FileTextOutlined, ToolOutlined, CheckCircleOutlined } from '@ant-design/icons'
 import { customerApi } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
+import zhCN from 'antd/locale/zh_CN'
 
 const { Title } = Typography
 
@@ -65,54 +66,58 @@ const Dashboard = () => {
   }
 
   return (
-    <div>
-      <Title level={2}>{getWelcomeMessage()}</Title>
-      
-      {loading ? (
-        <div style={{ textAlign: 'center', padding: '50px' }}>
-          <Spin size="large" />
-        </div>
-      ) : (
-        <Row gutter={[16, 16]}>
-          <Col xs={24} sm={12} md={6}>
-            <Card>
-              <Statistic 
-                title="客户总数" 
-                value={stats.totalCustomers} 
-                prefix={<TeamOutlined />} 
-              />
-            </Card>
-          </Col>
-          <Col xs={24} sm={12} md={6}>
-            <Card>
-              <Statistic 
-                title="待备案" 
-                value={stats.pendingFiling} 
-                prefix={<FileTextOutlined />} 
-              />
-            </Card>
-          </Col>
-          <Col xs={24} sm={12} md={6}>
-            <Card>
-              <Statistic 
-                title="待施工" 
-                value={stats.pendingConstruction} 
-                prefix={<ToolOutlined />} 
-              />
-            </Card>
-          </Col>
-          <Col xs={24} sm={12} md={6}>
-            <Card>
-              <Statistic 
-                title="已完成" 
-                value={stats.completed} 
-                prefix={<CheckCircleOutlined />} 
-              />
-            </Card>
-          </Col>
-        </Row>
-      )}
-    </div>
+    <ConfigProvider
+      locale={zhCN}
+    >
+      <div>
+        <Title level={2}>{getWelcomeMessage()}</Title>
+        
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '50px' }}>
+            <Spin size="large" />
+          </div>
+        ) : (
+          <Row gutter={[16, 16]}>
+            <Col xs={24} sm={12} md={6}>
+              <Card>
+                <Statistic 
+                  title="客户总数" 
+                  value={stats.totalCustomers} 
+                  prefix={<TeamOutlined />} 
+                />
+              </Card>
+            </Col>
+            <Col xs={24} sm={12} md={6}>
+              <Card>
+                <Statistic 
+                  title="待备案" 
+                  value={stats.pendingFiling} 
+                  prefix={<FileTextOutlined />} 
+                />
+              </Card>
+            </Col>
+            <Col xs={24} sm={12} md={6}>
+              <Card>
+                <Statistic 
+                  title="待施工" 
+                  value={stats.pendingConstruction} 
+                  prefix={<ToolOutlined />} 
+                />
+              </Card>
+            </Col>
+            <Col xs={24} sm={12} md={6}>
+              <Card>
+                <Statistic 
+                  title="已完成" 
+                  value={stats.completed} 
+                  prefix={<CheckCircleOutlined />} 
+                />
+              </Card>
+            </Col>
+          </Row>
+        )}
+      </div>
+    </ConfigProvider>
   )
 }
 
