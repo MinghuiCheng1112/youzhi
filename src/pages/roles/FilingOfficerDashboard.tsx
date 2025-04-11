@@ -52,19 +52,19 @@ const FilingOfficerDashboard = () => {
   // 计算统计数据
   useEffect(() => {
     if (customers.length > 0) {
-      const filedCount = customers.filter(c => c.filing_date).length
-      const pendingCount = customers.filter(c => !c.filing_date).length
+      const filedCount = customers.filter(c => c.filing_date && dayjs(c.filing_date).isValid()).length
+      const pendingCount = customers.filter(c => !c.filing_date || !dayjs(c.filing_date).isValid()).length
       
       // 计算今日备案数量
       const today = dayjs().startOf('day')
       const todayFiledCount = customers.filter(c => 
-        c.filing_date && dayjs(c.filing_date).isAfter(today)
+        c.filing_date && dayjs(c.filing_date).isValid() && dayjs(c.filing_date).isAfter(today)
       ).length
       
       // 计算本周备案数量
       const startOfWeek = dayjs().startOf('week')
       const thisWeekFiledCount = customers.filter(c => 
-        c.filing_date && dayjs(c.filing_date).isAfter(startOfWeek)
+        c.filing_date && dayjs(c.filing_date).isValid() && dayjs(c.filing_date).isAfter(startOfWeek)
       ).length
       
       // 计算总容量
@@ -97,19 +97,19 @@ const FilingOfficerDashboard = () => {
       return;
     }
     
-    const filedCount = filteredCustomers.filter(c => c.filing_date).length
-    const pendingCount = filteredCustomers.filter(c => !c.filing_date).length
+    const filedCount = filteredCustomers.filter(c => c.filing_date && dayjs(c.filing_date).isValid()).length
+    const pendingCount = filteredCustomers.filter(c => !c.filing_date || !dayjs(c.filing_date).isValid()).length
     
     // 计算今日备案数量
     const today = dayjs().startOf('day')
     const todayFiledCount = filteredCustomers.filter(c => 
-      c.filing_date && dayjs(c.filing_date).isAfter(today)
+      c.filing_date && dayjs(c.filing_date).isValid() && dayjs(c.filing_date).isAfter(today)
     ).length
     
     // 计算本周备案数量
     const startOfWeek = dayjs().startOf('week')
     const thisWeekFiledCount = filteredCustomers.filter(c => 
-      c.filing_date && dayjs(c.filing_date).isAfter(startOfWeek)
+      c.filing_date && dayjs(c.filing_date).isValid() && dayjs(c.filing_date).isAfter(startOfWeek)
     ).length
     
     // 计算总容量和用地面积（保留两位小数）
@@ -231,7 +231,11 @@ const FilingOfficerDashboard = () => {
         '容量(KW)': customer.capacity,
         '投资金额': customer.investment_amount,
         '用地面积': customer.land_area,
-        '备案日期': customer.filing_date ? dayjs(customer.filing_date).format('YYYY-MM-DD') : ''
+        '备案日期': customer.filing_date ? 
+          (dayjs(customer.filing_date).isValid() ? 
+            dayjs(customer.filing_date).format('YYYY-MM-DD') : 
+            customer.filing_date) : 
+          ''
       }))
 
       // 创建工作簿和工作表
@@ -342,16 +346,44 @@ const FilingOfficerDashboard = () => {
       title: '备案日期',
       dataIndex: 'filing_date',
       key: 'filing_date',
-      render: (text: string) => text ? (
-        <Tag color="green">{dayjs(text).format('YYYY-MM-DD')}</Tag>
-      ) : (
-        <Tag color="orange">未备案</Tag>
-      ),
+      render: (text: string) => {
+        // 检查日期是否为有效日期
+        if (text) {
+          try {
+            const date = dayjs(text);
+            if (date.isValid()) {
+              return <Tag color="green">{date.format('YYYY-MM-DD')}</Tag>;
+            } else {
+              // 显示原始值而不是"日期无效"
+              return <Tag color="red">{text}</Tag>;
+            }
+          } catch (error) {
+            console.error('备案日期格式错误:', text, error);
+            // 显示原始值而不是"日期无效"
+            return <Tag color="red">{text}</Tag>;
+          }
+        } else {
+          return <Tag color="orange">未备案</Tag>;
+        }
+      },
       sorter: (a: Customer, b: Customer) => {
         if (!a.filing_date && !b.filing_date) return 0;
         if (!a.filing_date) return -1;
         if (!b.filing_date) return 1;
-        return new Date(a.filing_date).getTime() - new Date(b.filing_date).getTime();
+        
+        // 确保日期格式正确
+        try {
+          const aDate = dayjs(a.filing_date);
+          const bDate = dayjs(b.filing_date);
+          
+          if (!aDate.isValid()) return -1;
+          if (!bDate.isValid()) return 1;
+          
+          return aDate.valueOf() - bDate.valueOf();
+        } catch (error) {
+          console.error('排序日期比较错误:', error);
+          return 0;
+        }
       },
       width: 110
     }
