@@ -13,21 +13,30 @@ export const calculateCapacity = (moduleCount: number | null): number => {
 }
 
 /**
+ * 根据组件数量计算备案容量（KW）
+ * 备案容量 = (组件数量 + 5) * 0.71KW
+ */
+export const calculateFilingCapacity = (moduleCount: number | null): number => {
+  if (moduleCount === null) return 0;
+  return parseFloat(((moduleCount + 5) * 0.71).toFixed(2))
+}
+
+/**
  * 根据组件数量计算投资金额
- * 投资金额 = 组件数量 * 0.71 * 0.25
+ * 投资金额 = (组件数量 + 5) * 0.71 * 0.25
  */
 export const calculateInvestmentAmount = (moduleCount: number | null): number => {
   if (moduleCount === null) return 0;
-  return parseFloat((moduleCount * 0.71 * 0.25).toFixed(2))
+  return parseFloat(((moduleCount + 5) * 0.71 * 0.25).toFixed(2))
 }
 
 /**
  * 根据组件数量计算用地面积（m²）
- * 用地面积 = 组件数量 * 3.106m²
+ * 用地面积 = (组件数量 + 5) * 3.106m²
  */
 export const calculateLandArea = (moduleCount: number | null): number => {
   if (moduleCount === null) return 0;
-  return parseFloat((moduleCount * 3.106).toFixed(2))
+  return parseFloat(((moduleCount + 5) * 3.106).toFixed(2))
 }
 
 /**
@@ -104,6 +113,7 @@ export const calculateAllFields = (moduleCount: number | null) => {
   if (moduleCount === null || moduleCount === 0 || moduleCount < 10) {
     return {
       capacity: moduleCount ? calculateCapacity(moduleCount) : 0,
+      filing_capacity: moduleCount ? calculateFilingCapacity(moduleCount) : 0,
       investment_amount: moduleCount ? calculateInvestmentAmount(moduleCount) : 0,
       land_area: moduleCount ? calculateLandArea(moduleCount) : 0,
       inverter: null,
@@ -114,6 +124,7 @@ export const calculateAllFields = (moduleCount: number | null) => {
   }
   
   const capacity = calculateCapacity(moduleCount)
+  const filingCapacity = calculateFilingCapacity(moduleCount)
   const investmentAmount = calculateInvestmentAmount(moduleCount)
   const landArea = calculateLandArea(moduleCount)
   const inverter = determineInverter(moduleCount)
@@ -123,6 +134,7 @@ export const calculateAllFields = (moduleCount: number | null) => {
   
   return {
     capacity,
+    filing_capacity: filingCapacity,
     investment_amount: investmentAmount,
     land_area: landArea,
     inverter,

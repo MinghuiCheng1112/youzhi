@@ -109,9 +109,10 @@ const CustomerForm = () => {
       return
     }
     
+    // 仅用于实时UI预览，让后端触发器负责数据库中的最终计算
     const fields = calculateAllFields(value)
     form.setFieldsValue(fields)
-    console.log('根据组件数量自动计算的字段:', fields)
+    console.log('根据组件数量自动计算的字段(仅UI预览):', fields)
   }
 
   // 提交表单
@@ -129,6 +130,8 @@ const CustomerForm = () => {
           ? (values.station_management.length > 0 ? `{${values.station_management.join(',')}}` : null)
           : (values.station_management || null),
       }
+      
+      // 不再手动计算相关字段，让数据库触发器处理计算
       
       // 不再将公司字段转换为中文，保持原始值
       console.log('公司字段值:', formattedValues.company);

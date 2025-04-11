@@ -67,8 +67,15 @@ const FilingOfficerDashboard = () => {
         c.filing_date && dayjs(c.filing_date).isValid() && dayjs(c.filing_date).isAfter(startOfWeek)
       ).length
       
-      // 计算总容量
-      const totalCapacity = parseFloat(customers.reduce((sum, c) => sum + (c.capacity || 0), 0).toFixed(2))
+      // 计算总备案容量
+      const totalFilingCapacity = parseFloat(customers.reduce((sum, c) => {
+        // 如果有filing_capacity字段，使用该字段值
+        // 否则如果有module_count，计算备案容量
+        // 否则使用capacity字段值（兼容旧数据）
+        const filingCapacity = c.filing_capacity ? c.filing_capacity : 
+          (c.module_count ? parseFloat(((c.module_count + 5) * 0.71).toFixed(2)) : (c.capacity || 0));
+        return sum + filingCapacity;
+      }, 0).toFixed(2))
       
       // 计算总投资金额
       const totalInvestment = customers.reduce((sum, c) => sum + (c.investment_amount || 0), 0)
@@ -82,7 +89,7 @@ const FilingOfficerDashboard = () => {
         pendingCount,
         todayFiledCount,
         thisWeekFiledCount,
-        totalCapacity,
+        totalCapacity: totalFilingCapacity, // 使用备案容量
         totalInvestment,
         totalLandArea
       })
@@ -112,9 +119,15 @@ const FilingOfficerDashboard = () => {
       c.filing_date && dayjs(c.filing_date).isValid() && dayjs(c.filing_date).isAfter(startOfWeek)
     ).length
     
-    // 计算总容量和用地面积（保留两位小数）
-    const calculatedCapacity = parseFloat(filteredCustomers.reduce((sum, c) => sum + (c.capacity || 0), 0).toFixed(2))
-    const calculatedLandArea = parseFloat(filteredCustomers.reduce((sum, c) => sum + (c.land_area || 0), 0).toFixed(2))
+    // 计算总备案容量
+    const totalFilingCapacity = parseFloat(filteredCustomers.reduce((sum, c) => {
+      // 如果有filing_capacity字段，使用该字段值
+      // 否则如果有module_count，计算备案容量
+      // 否则使用capacity字段值（兼容旧数据）
+      const filingCapacity = c.filing_capacity ? c.filing_capacity : 
+        (c.module_count ? parseFloat(((c.module_count + 5) * 0.71).toFixed(2)) : (c.capacity || 0));
+      return sum + filingCapacity;
+    }, 0).toFixed(2))
     
     // 计算总投资金额
     const totalInvestment = filteredCustomers.reduce((sum, c) => sum + (c.investment_amount || 0), 0)
@@ -125,9 +138,9 @@ const FilingOfficerDashboard = () => {
       pendingCount,
       todayFiledCount,
       thisWeekFiledCount,
-      totalCapacity: calculatedCapacity,
+      totalCapacity: totalFilingCapacity, // 使用备案容量
       totalInvestment,
-      totalLandArea: calculatedLandArea
+      totalLandArea: filteredCustomers.reduce((sum, c) => sum + (c.land_area || 0), 0)
     })
   }, [filteredCustomers])
 
@@ -228,7 +241,7 @@ const FilingOfficerDashboard = () => {
         '客户电话': customer.phone,
         '地址': customer.address,
         '身份证号': customer.id_card,
-        '容量(KW)': customer.capacity,
+        '备案容量(KW)': customer.filing_capacity,
         '投资金额': customer.investment_amount,
         '用地面积': customer.land_area,
         '备案日期': customer.filing_date ? 
@@ -268,19 +281,19 @@ const FilingOfficerDashboard = () => {
       width: 100
     },
     {
-      title: '容量(KW)',
-      dataIndex: 'capacity',
-      key: 'capacity',
+      title: '备案容量(KW)',
+      dataIndex: 'filing_capacity',
+      key: 'filing_capacity',
       render: (text: number, record: Customer) => {
-        // 如果有module_count但没有capacity，重新计算
-        const capacity = record.module_count && !text ? 
-          parseFloat((record.module_count * 0.71).toFixed(2)) : 
+        // 如果有module_count但没有filing_capacity，重新计算
+        const filingCapacity = record.module_count && !text ? 
+          parseFloat(((record.module_count + 5) * 0.71).toFixed(2)) : 
           text;
         
-        return capacity ? <Tag color="blue">{capacity} KW</Tag> : '-';
+        return filingCapacity ? <Tag color="blue">{filingCapacity} KW</Tag> : '-';
       },
-      sorter: (a: Customer, b: Customer) => (a.capacity || 0) - (b.capacity || 0),
-      width: 90
+      sorter: (a: Customer, b: Customer) => (a.filing_capacity || 0) - (b.filing_capacity || 0),
+      width: 110
     },
     {
       title: '客户地址',
@@ -421,7 +434,7 @@ const FilingOfficerDashboard = () => {
         <Col span={5}>
           <Card hoverable style={CARD_STYLE}>
             <Statistic 
-              title={<div><PieChartOutlined /> 总装机容量</div>} 
+              title={<div><PieChartOutlined /> 总备案容量</div>} 
               value={stats.totalCapacity.toFixed(2)} 
               valueStyle={{ color: '#fa8c16' }}
               suffix="KW"

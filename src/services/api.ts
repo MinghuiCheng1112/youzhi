@@ -882,10 +882,10 @@ export const customerApi = {
           continue
         }
 
-        // 计算相关字段
-        if (customer.module_count) {
-          const calculatedFields = calculateAllFields(customer.module_count)
-          Object.assign(customer, calculatedFields)
+        // 不再手动计算相关字段，让数据库触发器处理计算
+        // 只需确保module_count是数字类型
+        if (customer.module_count && typeof customer.module_count === 'string') {
+          customer.module_count = Number(customer.module_count);
         }
 
         // 创建客户

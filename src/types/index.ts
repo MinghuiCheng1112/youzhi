@@ -72,6 +72,7 @@ export interface Customer {
   updated_at: string
   deleted_at: string | null
   timestamp?: string // 时间戳字段，用于补充资料中的日期选项
+  filing_capacity?: number // 新增备案容量字段
 }
 
 // 修改记录类型定义

@@ -93,9 +93,10 @@ const NewCustomerForm = () => {
     
     setCalculatingFields(true)
     try {
+      // 仅用于实时UI预览，让后端触发器负责数据库中的最终计算
       const fields = calculateAllFields(value)
       form.setFieldsValue(fields)
-      console.log('根据组件数量自动计算的字段:', fields)
+      console.log('根据组件数量自动计算的字段(仅UI预览):', fields)
     } finally {
       setCalculatingFields(false)
     }
@@ -116,14 +117,7 @@ const NewCustomerForm = () => {
       const moduleCount = values.module_count ? Number(values.module_count) : null;
       formattedValues.module_count = moduleCount;
       
-      // 如果有模块数量，计算相关字段
-      if (moduleCount && moduleCount > 0) {
-        const calculatedFields = calculateAllFields(moduleCount);
-        formattedValues = {
-          ...formattedValues,
-          ...calculatedFields
-        };
-      }
+      // 不再手动计算相关字段，让数据库触发器处理这些计算
       
       // 如果是踏勘员创建客户，自动关联当前踏勘员信息
       if (userRole === 'surveyor' && user?.email) {
