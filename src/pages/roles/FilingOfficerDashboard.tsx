@@ -9,6 +9,11 @@ import { debounce } from 'lodash'
 import { calculateAllFields } from '../../utils/calculationUtils'
 // 如果遇到类型声明问题，请运行: npm i --save-dev @types/lodash
 
+// 扩展Customer类型，确保filing_capacity属性可用
+interface ExtendedCustomer extends Customer {
+  filing_capacity: number;
+}
+
 const { Title, Text } = Typography
 
 // 定义卡片样式
@@ -24,8 +29,8 @@ const CARD_STYLE: React.CSSProperties = {
 }
 
 const FilingOfficerDashboard = () => {
-  const [customers, setCustomers] = useState<Customer[]>([])
-  const [filteredCustomers, setFilteredCustomers] = useState<Customer[]>([])
+  const [customers, setCustomers] = useState<ExtendedCustomer[]>([])
+  const [filteredCustomers, setFilteredCustomers] = useState<ExtendedCustomer[]>([])
   const [loading, setLoading] = useState(true)
   const [searchText, setSearchText] = useState('')
   const [stats, setStats] = useState({
@@ -170,7 +175,7 @@ const FilingOfficerDashboard = () => {
           }
         }
         return customer
-      })
+      }) as ExtendedCustomer[] // 类型转换为ExtendedCustomer[]
       
       // 确保不过滤任何客户数据
       setCustomers(processedData)
@@ -186,7 +191,7 @@ const FilingOfficerDashboard = () => {
   }
 
   // 应用搜索过滤 - 支持多个关键字
-  const applySearchFilter = (data: Customer[], value: string) => {
+  const applySearchFilter = (data: ExtendedCustomer[], value: string) => {
     // 如果搜索为空，返回所有数据
     if (!value.trim()) return data;
     
@@ -273,7 +278,7 @@ const FilingOfficerDashboard = () => {
       title: '客户姓名',
       dataIndex: 'customer_name',
       key: 'customer_name',
-      sorter: (a: Customer, b: Customer) => a.customer_name.localeCompare(b.customer_name),
+      sorter: (a: ExtendedCustomer, b: ExtendedCustomer) => a.customer_name.localeCompare(b.customer_name),
       render: (text: string) => (
         <span style={{ fontWeight: 'bold' }}>{text}</span>
       ),
@@ -284,7 +289,7 @@ const FilingOfficerDashboard = () => {
       title: '备案容量',
       dataIndex: 'filing_capacity',
       key: 'filing_capacity',
-      render: (text: number, record: Customer) => {
+      render: (text: number, record: ExtendedCustomer) => {
         // 如果有module_count但没有filing_capacity，重新计算
         const filingCapacity = record.module_count && !text ? 
           parseFloat(((record.module_count + 5) * 0.71).toFixed(2)) : 
@@ -292,7 +297,7 @@ const FilingOfficerDashboard = () => {
         
         return filingCapacity ? <Tag color="blue">{filingCapacity} KW</Tag> : '-';
       },
-      sorter: (a: Customer, b: Customer) => (a.filing_capacity || 0) - (b.filing_capacity || 0),
+      sorter: (a: ExtendedCustomer, b: ExtendedCustomer) => (a.filing_capacity || 0) - (b.filing_capacity || 0),
       width: 110
     },
     {
@@ -305,7 +310,7 @@ const FilingOfficerDashboard = () => {
           <span>{text}</span>
         </Tooltip>
       ),
-      sorter: (a: Customer, b: Customer) => (a.address || '').localeCompare(b.address || ''),
+      sorter: (a: ExtendedCustomer, b: ExtendedCustomer) => (a.address || '').localeCompare(b.address || ''),
       width: 180
     },
     {
@@ -314,7 +319,7 @@ const FilingOfficerDashboard = () => {
       key: 'id_card',
       ellipsis: true,
       render: (text: string) => <span>{text}</span>,
-      sorter: (a: Customer, b: Customer) => (a.id_card || '').localeCompare(b.id_card || ''),
+      sorter: (a: ExtendedCustomer, b: ExtendedCustomer) => (a.id_card || '').localeCompare(b.id_card || ''),
       width: 160
     },
     {
@@ -322,14 +327,14 @@ const FilingOfficerDashboard = () => {
       dataIndex: 'phone',
       key: 'phone',
       render: (text: string) => <a href={`tel:${text}`}>{text}</a>,
-      sorter: (a: Customer, b: Customer) => (a.phone || '').localeCompare(b.phone || ''),
+      sorter: (a: ExtendedCustomer, b: ExtendedCustomer) => (a.phone || '').localeCompare(b.phone || ''),
       width: 120
     },
     {
       title: '投资金额',
       dataIndex: 'investment_amount',
       key: 'investment_amount',
-      render: (text: number, record: Customer) => {
+      render: (text: number, record: ExtendedCustomer) => {
         // 如果有module_count但没有investment_amount，重新计算
         const amount = record.module_count && !text ? 
           parseFloat((record.module_count * 0.71 * 0.25).toFixed(2)) : 
@@ -337,14 +342,14 @@ const FilingOfficerDashboard = () => {
         
         return amount ? <span style={{ color: '#389e0d' }}>¥ {amount}</span> : '-';
       },
-      sorter: (a: Customer, b: Customer) => (a.investment_amount || 0) - (b.investment_amount || 0),
+      sorter: (a: ExtendedCustomer, b: ExtendedCustomer) => (a.investment_amount || 0) - (b.investment_amount || 0),
       width: 100
     },
     {
       title: '用地面积',
       dataIndex: 'land_area',
       key: 'land_area',
-      render: (text: number, record: Customer) => {
+      render: (text: number, record: ExtendedCustomer) => {
         // 如果有module_count但没有land_area，重新计算
         const area = record.module_count && !text ? 
           parseFloat((record.module_count * 3.106).toFixed(2)) : 
@@ -352,7 +357,7 @@ const FilingOfficerDashboard = () => {
         
         return area ? <span>{area} m²</span> : '-';
       },
-      sorter: (a: Customer, b: Customer) => (a.land_area || 0) - (b.land_area || 0),
+      sorter: (a: ExtendedCustomer, b: ExtendedCustomer) => (a.land_area || 0) - (b.land_area || 0),
       width: 100
     },
     {
@@ -379,7 +384,7 @@ const FilingOfficerDashboard = () => {
           return <Tag color="orange">未备案</Tag>;
         }
       },
-      sorter: (a: Customer, b: Customer) => {
+      sorter: (a: ExtendedCustomer, b: ExtendedCustomer) => {
         if (!a.filing_date && !b.filing_date) return 0;
         if (!a.filing_date) return -1;
         if (!b.filing_date) return 1;
