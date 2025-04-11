@@ -241,7 +241,7 @@ const FilingOfficerDashboard = () => {
         '客户电话': customer.phone,
         '地址': customer.address,
         '身份证号': customer.id_card,
-        '备案容量(KW)': customer.filing_capacity,
+        '备案容量': customer.filing_capacity,
         '投资金额': customer.investment_amount,
         '用地面积': customer.land_area,
         '备案日期': customer.filing_date ? 
@@ -281,7 +281,7 @@ const FilingOfficerDashboard = () => {
       width: 100
     },
     {
-      title: '备案容量(KW)',
+      title: '备案容量',
       dataIndex: 'filing_capacity',
       key: 'filing_capacity',
       render: (text: number, record: Customer) => {
