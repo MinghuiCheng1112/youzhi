@@ -415,11 +415,11 @@ const CustomerList = () => {
       // 检查是否有任何筛选条件
       if (trimmed === '' && !registerDateRange && !filingDateRange) {
         // 如果没有搜索关键词和日期筛选，恢复全部数据
-      setFilteredCustomers(customers);
-      setTotalPages(Math.ceil(customers.length / pageSize));
-      setCurrentPage(1); // 重置到第一页
-      return;
-    }
+        setFilteredCustomers(customers);
+        setTotalPages(Math.ceil(customers.length / pageSize));
+        setCurrentPage(1); // 重置到第一页
+        return;
+      }
       
       // 先按日期范围筛选客户
       let dateFilteredCustomers = [...customers];
@@ -452,45 +452,45 @@ const CustomerList = () => {
       if (trimmed === '') {
         setFilteredCustomers(dateFilteredCustomers);
         setTotalPages(Math.ceil(dateFilteredCustomers.length / pageSize));
-      setCurrentPage(1); // 重置到第一页
-      return;
-    }
-
-    // 支持空格或逗号分隔的多关键词搜索
+        setCurrentPage(1); // 重置到第一页
+        return;
+      }
+      
+      // 支持空格或逗号分隔的多关键词搜索
       const keywords = trimmed.split(/[\s,，]+/)
-      .filter(keyword => keyword.trim() !== ''); // 过滤掉空字符串
-    
+        .filter(keyword => keyword.trim() !== ''); // 过滤掉空字符串
+      
       if (keywords.length === 0) {
         setFilteredCustomers(dateFilteredCustomers);
         setTotalPages(Math.ceil(dateFilteredCustomers.length / pageSize));
         setCurrentPage(1); // 重置到第一页
         return;
       }
-    
-    // 获取启用的搜索字段
-    const enabledFields = Object.entries(searchFields)
-      .filter(([_, enabled]) => enabled)
-      .map(([field]) => field);
-    
-    // 如果没有启用任何字段，使用默认字段
-    if (enabledFields.length === 0) {
-      enabledFields.push('customer_name', 'phone', 'address', 'salesman', 'id_card', 'meter_number');
-    }
-    
+      
+      // 获取启用的搜索字段
+      const enabledFields = Object.entries(searchFields)
+        .filter(([_, enabled]) => enabled)
+        .map(([field]) => field);
+      
+      // 如果没有启用任何字段，使用默认字段
+      if (enabledFields.length === 0) {
+        enabledFields.push('customer_name', 'phone', 'address', 'salesman', 'id_card', 'meter_number');
+      }
+      
       // 在日期筛选结果的基础上进行关键词筛选
       const filtered = dateFilteredCustomers.filter(customer => {
-      // 检查启用的每个字段
-      return keywords.some(keyword => 
-        enabledFields.some(field => {
+        // 检查启用的每个字段
+        return keywords.some(keyword => 
+          enabledFields.some(field => {
             const fieldValue = ((customer as any)[field] || '').toString().toLowerCase();
             return fieldValue.includes(keyword.toLowerCase());
-        })
-      );
-    });
-    
-    setFilteredCustomers(filtered);
-    setTotalPages(Math.ceil(filtered.length / pageSize));
-    setCurrentPage(1); // 重置到第一页
+          })
+        );
+      });
+      
+      setFilteredCustomers(filtered);
+      setTotalPages(Math.ceil(filtered.length / pageSize));
+      setCurrentPage(1); // 重置到第一页
     } catch (error) {
       console.error('搜索出错:', error);
       message.error('搜索过程中出现错误');
@@ -566,7 +566,7 @@ const CustomerList = () => {
       </Row>
     </div>
   );
-  
+
   // 使用立即处理的方式代替防抖，避免延迟
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -1796,11 +1796,11 @@ const CustomerList = () => {
                 editForm.setFieldsValue({ construction_team_phone: teamPhone });
                 break;
               case 'drawing_change':
-              // 如果为空，设置为默认值
+                // 如果为空，设置为默认值
                 if (value === null || value === undefined || value === '' || 
                     (Array.isArray(value) && value.length === 0)) {
-                editForm.setFieldsValue({ drawing_change: '未出图' });
-              }
+                  editForm.setFieldsValue({ drawing_change: '未出图' });
+                }
                 break;
             }
           }}
@@ -4191,12 +4191,49 @@ const CustomerList = () => {
       key: 'status',
       width: 120,
       render: (value, record) => {
+        // 检查购售电合同是否为"待出"状态
+        const isPowerPurchaseContractPending = !record.power_purchase_contract;
+        
+        // 如果购售电合同为空，显示灰色禁用按钮
+        if (isPowerPurchaseContractPending) {
+          return (
+            <Tooltip title="需要先完成购售电合同">
+              <Button
+                size="small"
+                disabled
+                style={{ color: 'rgba(0, 0, 0, 0.25)', background: '#f5f5f5', borderColor: '#d9d9d9' }}
+              >
+                待处理
+              </Button>
+            </Tooltip>
+          );
+        }
+        
+        // 如果购售电合同已完成，则显示各种状态并允许修改
         if (value === "已完成") {
-          return <Tag color="success">{value}</Tag>;
+          return <Tag 
+            color="success"
+            style={{ cursor: 'pointer' }}
+            onClick={() => record.id && showStatusOptions(record.id, value)}
+          >
+            {value}
+          </Tag>;
         } else if (value === "技术驳回" || value === "商务驳回") {
-          return <Tag color="error">{value}</Tag>;
+          return <Tag 
+            color="error"
+            style={{ cursor: 'pointer' }}
+            onClick={() => record.id && showStatusOptions(record.id, value)}
+          >
+            {value}
+          </Tag>;
         } else if (value === "提交资料") {
-          return <Tag color="processing">{value}</Tag>;
+          return <Tag 
+            color="processing"
+            style={{ cursor: 'pointer' }}
+            onClick={() => record.id && showStatusOptions(record.id, value)}
+          >
+            {value}
+          </Tag>;
         } else {
           return (
             <Button
@@ -4822,8 +4859,8 @@ const CustomerList = () => {
       if (error instanceof Error) {
         message.error(`更新失败: ${error.message}`);
       } else {
-      message.error('操作失败，请重试');
-    }
+        message.error('操作失败，请重试');
+      }
       
       // 失败时重新获取数据
       fetchCustomers();
@@ -5014,7 +5051,27 @@ const CustomerList = () => {
           显示 {filteredCustomers.length} 条记录，共 {filteredCustomers.length} 条
         </div>
       </Space>
+      
       <Space>
+        <Input
+          style={{ width: 200 }}
+          placeholder="搜索客户姓名"
+          allowClear
+          prefix={<SearchOutlined />}
+          onChange={(e) => {
+            const value = e.target.value;
+            // 只搜索客户姓名字段
+            if (value.trim() === '') {
+              setFilteredCustomers(customers);
+            } else {
+              const filtered = customers.filter(customer => 
+                customer.customer_name && customer.customer_name.toLowerCase().includes(value.toLowerCase())
+              );
+              setFilteredCustomers(filtered);
+            }
+          }}
+        />
+        
         <Button 
           type="primary" 
           icon={<PlusOutlined />} 
@@ -5039,7 +5096,7 @@ const CustomerList = () => {
           导出数据
           </Button>
         </Space>
-      </div>
+    </div>
   )
 
   // 添加一个专门用于踏勘员的可编辑单元格
