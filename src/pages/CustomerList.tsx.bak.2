@@ -805,9 +805,6 @@ const CustomerList = () => {
         const moduleCountValue = values.module_count;
         console.log('处理module_count值:', moduleCountValue, '类型:', typeof moduleCountValue);
         
-        // 注意: 当组件数量大于0时，数据库会自动将图纸变更状态从"未出图"设置为"已出图"
-        // 这是由数据库触发器auto_update_drawing_change实现的，只有当图纸变更状态为"已出图"后，前端才能修改该状态
-        
         // 如果为空字符串或undefined，设置为null
         if (moduleCountValue === '' || moduleCountValue === undefined) {
           // 当组件数量为空时，相关字段也设置为空值
@@ -2667,60 +2664,10 @@ const CustomerList = () => {
       ellipsis: true,
     },
     {
-      title: (
-        <TableHeaderFilter
-          title="催单"
-          dataIndex="urge_order"
-          values={Array.from(new Set(customers.map(item => item.urge_order ? dayjs(item.urge_order).format('MM-DD HH:mm') : ''))).sort()}
-          allValues={customers.map(item => item.urge_order ? dayjs(item.urge_order).format('MM-DD HH:mm') : '')}
-          totalRows={customers.length}
-          onSort={(direction) => {
-            if (direction === 'ascend') {
-              setFilteredCustomers([...filteredCustomers].sort((a, b) => {
-                if (!a.urge_order && !b.urge_order) return 0;
-                if (!a.urge_order) return -1;
-                if (!b.urge_order) return 1;
-                return new Date(a.urge_order).getTime() - new Date(b.urge_order).getTime();
-              }));
-            } else if (direction === 'descend') {
-              setFilteredCustomers([...filteredCustomers].sort((a, b) => {
-                if (!a.urge_order && !b.urge_order) return 0;
-                if (!a.urge_order) return 1;
-                if (!b.urge_order) return -1;
-                return new Date(b.urge_order).getTime() - new Date(a.urge_order).getTime();
-              }));
-            } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-            }
-          }}
-          onFilter={(selectedValues) => {
-            if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
-            }
-            
-            // 筛选催单日期
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.urge_order ? dayjs(customer.urge_order).format('MM-DD HH:mm') : '')
-              )
-            );
-          }}
-          onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
-          }}
-        />
-      ),
+      title: '催单',
       dataIndex: 'urge_order',
       key: 'urge_order',
       width: 120,
-      align: 'center' as const,
       render: (text: string | null, record: Customer) => {
         // 检查station_management是否包含时间戳
         const hasTimestamp = Array.isArray(record.station_management) && 
@@ -3761,61 +3708,7 @@ const CustomerList = () => {
       ellipsis: true,
     },
     {
-      title: (
-        <TableHeaderFilter
-          title="上传国网"
-          dataIndex="upload_to_grid"
-          values={Array.from(new Set(customers.map(item => 
-            item.upload_to_grid ? '已上传' : '未上传'
-          ))).sort()}
-          allValues={customers.map(item => 
-            item.upload_to_grid ? '已上传' : '未上传'
-          )}
-          totalRows={customers.length}
-          onSort={(direction) => {
-            // 处理排序逻辑
-            if (direction === 'ascend') {
-              setFilteredCustomers([...filteredCustomers].sort((a, b) => {
-                // 未上传排在前面，已上传排在后面
-                const aStatus = a.upload_to_grid ? 1 : 0;
-                const bStatus = b.upload_to_grid ? 1 : 0;
-                return aStatus - bStatus;
-              }));
-            } else if (direction === 'descend') {
-              setFilteredCustomers([...filteredCustomers].sort((a, b) => {
-                // 已上传排在前面，未上传排在后面
-                const aStatus = a.upload_to_grid ? 1 : 0;
-                const bStatus = b.upload_to_grid ? 1 : 0;
-                return bStatus - aStatus;
-              }));
-            } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-            }
-          }}
-          onFilter={(selectedValues) => {
-            if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
-            }
-            
-            // 筛选上传国网状态
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.upload_to_grid ? '已上传' : '未上传')
-              )
-            );
-          }}
-          onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
-          }}
-        />
-      ),
+      title: '上传国网',
       dataIndex: 'upload_to_grid',
       key: 'upload_to_grid',
       width: 130,
@@ -3854,61 +3747,7 @@ const CustomerList = () => {
       ellipsis: true,
     },
     {
-      title: (
-        <TableHeaderFilter
-          title="建设验收"
-          dataIndex="construction_acceptance_date"
-          values={Array.from(new Set(customers.map(item => 
-            item.construction_acceptance_date ? '已推到' : '未推到'
-          ))).sort()}
-          allValues={customers.map(item => 
-            item.construction_acceptance_date ? '已推到' : '未推到'
-          )}
-          totalRows={customers.length}
-          onSort={(direction) => {
-            // 处理排序逻辑
-            if (direction === 'ascend') {
-              setFilteredCustomers([...filteredCustomers].sort((a, b) => {
-                // 未推到排在前面，已推到排在后面
-                const aStatus = a.construction_acceptance_date ? 1 : 0;
-                const bStatus = b.construction_acceptance_date ? 1 : 0;
-                return aStatus - bStatus;
-              }));
-            } else if (direction === 'descend') {
-              setFilteredCustomers([...filteredCustomers].sort((a, b) => {
-                // 已推到排在前面，未推到排在后面
-                const aStatus = a.construction_acceptance_date ? 1 : 0;
-                const bStatus = b.construction_acceptance_date ? 1 : 0;
-                return bStatus - aStatus;
-              }));
-            } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-            }
-          }}
-          onFilter={(selectedValues) => {
-            if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
-            }
-            
-            // 筛选建设验收状态
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.construction_acceptance_date ? '已推到' : '未推到')
-              )
-            );
-          }}
-          onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
-          }}
-        />
-      ),
+      title: '建设验收',
       dataIndex: 'construction_acceptance_date',
       key: 'construction_acceptance_date',
       width: 130,
@@ -3945,61 +3784,7 @@ const CustomerList = () => {
       ellipsis: true,
     },
     {
-      title: (
-        <TableHeaderFilter
-          title="挂表日期"
-          dataIndex="meter_installation_date"
-          values={Array.from(new Set(customers.map(item => 
-            item.meter_installation_date ? '已挂表' : '未挂表'
-          ))).sort()}
-          allValues={customers.map(item => 
-            item.meter_installation_date ? '已挂表' : '未挂表'
-          )}
-          totalRows={customers.length}
-          onSort={(direction) => {
-            // 处理排序逻辑
-            if (direction === 'ascend') {
-              setFilteredCustomers([...filteredCustomers].sort((a, b) => {
-                // 未挂表排在前面，已挂表排在后面
-                const aStatus = a.meter_installation_date ? 1 : 0;
-                const bStatus = b.meter_installation_date ? 1 : 0;
-                return aStatus - bStatus;
-              }));
-            } else if (direction === 'descend') {
-              setFilteredCustomers([...filteredCustomers].sort((a, b) => {
-                // 已挂表排在前面，未挂表排在后面
-                const aStatus = a.meter_installation_date ? 1 : 0;
-                const bStatus = b.meter_installation_date ? 1 : 0;
-                return bStatus - aStatus;
-              }));
-            } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-            }
-          }}
-          onFilter={(selectedValues) => {
-            if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
-            }
-            
-            // 筛选挂表状态
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.meter_installation_date ? '已挂表' : '未挂表')
-              )
-            );
-          }}
-          onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
-          }}
-        />
-      ),
+      title: '挂表日期',
       dataIndex: 'meter_installation_date',
       key: 'meter_installation_date',
       width: 130,
@@ -4038,61 +3823,7 @@ const CustomerList = () => {
       ellipsis: true,
     },
     {
-      title: (
-        <TableHeaderFilter
-          title="购售电合同"
-          dataIndex="power_purchase_contract"
-          values={Array.from(new Set(customers.map(item => 
-            item.power_purchase_contract ? '已出合同' : '待出'
-          ))).sort()}
-          allValues={customers.map(item => 
-            item.power_purchase_contract ? '已出合同' : '待出'
-          )}
-          totalRows={customers.length}
-          onSort={(direction) => {
-            // 处理排序逻辑
-            if (direction === 'ascend') {
-              setFilteredCustomers([...filteredCustomers].sort((a, b) => {
-                // 待出排在前面，已出合同排在后面
-                const aStatus = a.power_purchase_contract ? 1 : 0;
-                const bStatus = b.power_purchase_contract ? 1 : 0;
-                return aStatus - bStatus;
-              }));
-            } else if (direction === 'descend') {
-              setFilteredCustomers([...filteredCustomers].sort((a, b) => {
-                // 已出合同排在前面，待出排在后面
-                const aStatus = a.power_purchase_contract ? 1 : 0;
-                const bStatus = b.power_purchase_contract ? 1 : 0;
-                return bStatus - aStatus;
-              }));
-            } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-            }
-          }}
-          onFilter={(selectedValues) => {
-            if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
-            }
-            
-            // 筛选购售电合同状态
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.power_purchase_contract ? '已出合同' : '待出')
-              )
-            );
-          }}
-          onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
-          }}
-        />
-      ),
+      title: '购售电合同',
       dataIndex: 'power_purchase_contract',
       key: 'power_purchase_contract',
       width: 130,
@@ -4131,77 +3862,70 @@ const CustomerList = () => {
       ellipsis: true,
     },
     {
-      title: (
-        <TableHeaderFilter
-          title="状态"
-          dataIndex="status"
-          values={Array.from(new Set(customers.map(item => 
-            item.status || '待处理'
-          ))).sort()}
-          allValues={customers.map(item => 
-            item.status || '待处理'
-          )}
-          totalRows={customers.length}
-          onSort={(direction) => {
-            // 处理排序逻辑
-            if (direction === 'ascend') {
-              setFilteredCustomers([...filteredCustomers].sort((a, b) => {
-                const statusOrder = {'已完成': 4, '商务驳回': 3, '技术驳回': 2, '提交资料': 1, '待处理': 0};
-                const aStatus = statusOrder[a.status || '待处理'] || 0;
-                const bStatus = statusOrder[b.status || '待处理'] || 0;
-                return aStatus - bStatus;
-              }));
-            } else if (direction === 'descend') {
-              setFilteredCustomers([...filteredCustomers].sort((a, b) => {
-                const statusOrder = {'已完成': 4, '商务驳回': 3, '技术驳回': 2, '提交资料': 1, '待处理': 0};
-                const aStatus = statusOrder[a.status || '待处理'] || 0;
-                const bStatus = statusOrder[b.status || '待处理'] || 0;
-                return bStatus - aStatus;
-              }));
-            } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-            }
-          }}
-          onFilter={(selectedValues) => {
-            if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
-            }
-            
-            // 筛选状态
-            setFilteredCustomers(
-              customers.filter(customer => {
-                const status = customer.status || '待处理';
-                return selectedValues.includes(status);
-              })
-            );
-          }}
-          onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
-          }}
-        />
-      ),
+      title: '状态',
       dataIndex: 'status',
       key: 'status',
       width: 120,
-      render: (value, record) => {
-        if (value === "已完成") {
-          return <Tag color="success">{value}</Tag>;
-        } else if (value === "技术驳回" || value === "商务驳回") {
-          return <Tag color="error">{value}</Tag>;
-        } else if (value === "提交资料") {
-          return <Tag color="processing">{value}</Tag>;
+      render: (text, record) => {
+        // 检查购售电合同是否为"待出"状态
+        const isPowerPurchaseContractPending = !record.power_purchase_contract;
+        
+        // 如果购售电合同为"待出"状态，显示灰色禁用按钮
+        if (isPowerPurchaseContractPending) {
+          return (
+            <Tooltip title="需要先完成购售电合同">
+              <Button
+                size="small"
+                disabled
+                style={{ color: 'rgba(0, 0, 0, 0.25)', background: '#f5f5f5', borderColor: '#d9d9d9' }}
+              >
+                待处理
+              </Button>
+            </Tooltip>
+          );
+        }
+        
+        // 如果购售电合同已完成，显示当前状态或可点击的蓝色按钮
+        if (text) {
+          // 映射状态到颜色
+          const statusColorMap: Record<string, string> = {
+            '待处理': 'blue',
+          '提交资料': 'blue',
+          '技术驳回': 'red',
+          '商务驳回': 'orange',
+          '已完成': 'green'
+          };
+          
+          const color = statusColorMap[text] || 'blue';
+          
+          // 如果是蓝色状态，显示为可点击的按钮
+          if (color === 'blue') {
+            return (
+              <Button
+                type="primary"
+                size="small"
+                onClick={() => record.id && showStatusOptions(record.id, text || '待处理')}
+              >
+                {text}
+              </Button>
+            );
+          }
+          
+          // 其他状态显示为对应颜色的标签
+          return (
+            <Tag 
+              color={color}
+              style={{ cursor: 'pointer' }}
+              onClick={() => record.id && showStatusOptions(record.id, text)}
+            >
+              {text}
+            </Tag>
+          );
         } else {
+          // 如果没有状态，显示为蓝色"待处理"按钮
           return (
             <Button
-              type="text" 
-              className="status-button"
+              type="primary"
               size="small"
               onClick={() => record.id && showStatusOptions(record.id, '待处理')}
             >
@@ -4210,7 +3934,18 @@ const CustomerList = () => {
           );
         }
       },
-      // filters和onFilter属性已删除
+      filters: [
+        { text: '待处理', value: '待处理' },
+        { text: '提交资料', value: '提交资料' },
+        { text: '技术驳回', value: '技术驳回' },
+        { text: '商务驳回', value: '商务驳回' },
+        { text: '已完成', value: '已完成' }
+      ],
+      onFilter: (value, record) => {
+        // 对于状态为空的记录，默认认为是"待处理"
+        const status = record.status || '待处理';
+        return status === value;
+      },
     },
     {
       title: (
@@ -4269,51 +4004,7 @@ const CustomerList = () => {
       render: (value, record) => <EditableCell value={value} record={record} dataIndex="price" title="价格" required={false} />,
     },
     {
-      title: (
-        <TableHeaderFilter
-          title="公司"
-          dataIndex="company"
-          values={Array.from(new Set(customers.map(item => item.company || ''))).sort()}
-          allValues={customers.map(item => item.company || '')}
-          totalRows={customers.length}
-          onSort={(direction) => {
-            // 处理排序逻辑
-            if (direction === 'ascend') {
-              setFilteredCustomers([...filteredCustomers].sort((a, b) => 
-                (a.company || '').localeCompare(b.company || '')
-              ));
-            } else if (direction === 'descend') {
-              setFilteredCustomers([...filteredCustomers].sort((a, b) => 
-                (b.company || '').localeCompare(a.company || '')
-              ));
-            } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-            }
-          }}
-          onFilter={(selectedValues) => {
-            if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
-            }
-            
-            // 筛选公司
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.company || '')
-              )
-            );
-          }}
-          onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
-          }}
-        />
-      ),
+      title: '公司',
       dataIndex: 'company',
       key: 'company',
       render: (value, record) => {

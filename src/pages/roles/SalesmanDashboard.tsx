@@ -620,7 +620,8 @@ const SalesmanDashboard = () => {
             child: {
               id: sub.id,
               email: sub.email,
-              name: sub.name || sub.email
+              name: sub.name || sub.email,
+              phone: sub.phone || '' // 添加电话号码信息
             }
           }));
           
@@ -659,7 +660,8 @@ const SalesmanDashboard = () => {
               child: {
                 id: relation.child_id,
                 email: childSalesman.email,
-                name: displayName
+                name: displayName,
+                phone: childSalesman.phone || '' // 添加电话号码信息
               }
             });
           } else {
@@ -670,7 +672,8 @@ const SalesmanDashboard = () => {
               child: {
                 id: relation.child_id,
                 email: `未知邮箱-${relation.child_id.substring(0, 8)}`,
-                name: `业务员-${relation.child_id.substring(0, 8)}`
+                name: `业务员-${relation.child_id.substring(0, 8)}`,
+                phone: '无电话' // 添加默认电话信息
               }
             });
           }
@@ -705,18 +708,67 @@ const SalesmanDashboard = () => {
         return;
       }
       
-      // 获取所有子账号邮箱
+      // 获取当前业务员电话号码
+      let salesmanPhone = '';
+      try {
+        // 查询业务员信息
+        const { data: userData } = await supabase
+          .from('user_roles')
+          .select('phone')
+          .eq('user_id', user.id)
+          .eq('role', 'salesman')
+          .single();
+        
+        if (userData && userData.phone) {
+          salesmanPhone = userData.phone;
+          console.log('获取到当前业务员电话:', salesmanPhone);
+        }
+      } catch (err) {
+        console.error('获取业务员电话失败:', err);
+      }
+      
+      // 获取所有子账号邮箱和电话
       const childEmails = subSalesmen.map(sub => sub.child?.email).filter(Boolean);
+      const childPhones = [];
+      
+      // 获取子账号电话
+      if (subSalesmen.length > 0) {
+        try {
+          // 获取所有子账号ID
+          const childIds = subSalesmen.map(sub => sub.child_id).filter(Boolean);
+          
+          // 查询所有子账号的电话
+          const { data: subsData } = await supabase
+            .from('user_roles')
+            .select('user_id, phone')
+            .eq('role', 'salesman')
+            .in('user_id', childIds);
+          
+          if (subsData && subsData.length > 0) {
+            // 将子账号电话添加到列表
+            subsData.forEach(sub => {
+              if (sub.phone) {
+                childPhones.push(sub.phone);
+              }
+            });
+            console.log('获取到子账号电话列表:', childPhones);
+          }
+        } catch (err) {
+          console.error('获取子账号电话失败:', err);
+        }
+      }
       
       console.log('当前业务员邮箱:', salesmanEmail);
+      console.log('当前业务员电话:', salesmanPhone);
       console.log('子账号邮箱列表:', childEmails);
+      console.log('子账号电话列表:', childPhones);
       console.log('所有客户数据:', data.length, '条记录');
       
       // 过滤出当前业务员的客户和子账号的客户
       const salesmanCustomers = data.filter(customer => {
         if (!customer) return false;
         
-        // 优先使用salesman_email字段匹配
+        // 1. 优先使用salesman_email字段匹配
         if (customer.salesman_email) {
           // 如果存在salesman_email字段，与当前用户邮箱或子账号邮箱比较
           const customerSalesmanEmail = String(customer.salesman_email).toLowerCase();
@@ -738,7 +790,28 @@ const SalesmanDashboard = () => {
           }
         }
         
-        // 如果没有salesman_email字段，回退到使用salesman字段
+        // 2. 使用salesman_phone字段匹配业务员电话
+        if (customer.salesman_phone && salesmanPhone) {
+          const customerSalesmanPhone = String(customer.salesman_phone).trim();
+          
+          // 检查是否与当前业务员电话匹配
+          if (customerSalesmanPhone === salesmanPhone) {
+            console.log('通过salesman_phone匹配到当前业务员客户:', customer.customer_name);
+            return true;
+          }
+          
+          // 检查是否与任何子账号电话匹配
+          const childPhoneMatch = childPhones.some(phone => 
+            phone && customerSalesmanPhone === phone
+          );
+          
+          if (childPhoneMatch) {
+            console.log('通过salesman_phone匹配到子账号客户:', customer.customer_name);
+            return true;
+          }
+        }
+        
+        // 3. 回退到使用salesman字段
         if (customer.salesman) {
           // 确保salesman字段存在且是字符串
           const customerSalesman = String(customer.salesman).toLowerCase();
@@ -903,20 +976,25 @@ const SalesmanDashboard = () => {
     try {
       setLoading(true);
       
-      // 获取子账号的信息
-      const selectedSalesmanInfo = subSalesmen.find(s => s.child_id === salesmanId)?.child;
-      if (!selectedSalesmanInfo) {
-        message.error('找不到该业务员');
-        // 确保在找不到业务员时设置空列表
+      // 获取选定子账号的邮箱
+      let selectedSalesmanEmail = '';
+      let selectedSalesmanName = '';
+      let selectedSalesmanPhone = '';
+      
+      // 寻找选中的子账号
+      const selectedSub = subSalesmen.find(sub => sub.child_id === salesmanId);
+      if (selectedSub) {
+        selectedSalesmanEmail = selectedSub.child.email || '';
+        selectedSalesmanName = selectedSub.child.name || '';
+        selectedSalesmanPhone = selectedSub.child.phone || '';
+        
+        console.log(`选定子账号信息: 姓名=${selectedSalesmanName}, 邮箱=${selectedSalesmanEmail}, 电话=${selectedSalesmanPhone}`);
+      } else {
+        console.error('未找到选中的子账号信息');
         setCustomers([]);
         setFilteredCustomers([]);
         return;
       }
-      
-      const selectedSalesmanEmail = selectedSalesmanInfo.email;
-      const selectedSalesmanName = selectedSalesmanInfo.name;
-      
-      console.log('选择的子账号信息:', selectedSalesmanInfo);
       
       // 获取所有客户
       const data = await customerApi.getAll();
@@ -931,6 +1009,15 @@ const SalesmanDashboard = () => {
           const matchByEmail = selectedSalesmanEmail && customerSalesmanEmail === selectedSalesmanEmail.toLowerCase();
           if (matchByEmail) {
             console.log(`通过salesman_email匹配到子账号 ${selectedSalesmanName} 的客户:`, customer.customer_name);
+            return true;
+          }
+        }
+        
+        // 使用salesman_phone字段匹配业务员电话
+        if (customer.salesman_phone && selectedSalesmanPhone) {
+          const customerSalesmanPhone = String(customer.salesman_phone).trim();
+          if (customerSalesmanPhone === selectedSalesmanPhone) {
+            console.log(`通过salesman_phone匹配到子账号 ${selectedSalesmanName} 的客户:`, customer.customer_name);
             return true;
           }
         }
@@ -988,6 +1075,25 @@ const SalesmanDashboard = () => {
         return;
       }
       
+      // 获取当前业务员电话号码
+      let salesmanPhone = '';
+      try {
+        // 查询业务员信息
+        const { data: userData } = await supabase
+          .from('user_roles')
+          .select('phone')
+          .eq('user_id', user.id)
+          .eq('role', 'salesman')
+          .single();
+        
+        if (userData && userData.phone) {
+          salesmanPhone = userData.phone;
+          console.log('获取到当前业务员电话:', salesmanPhone);
+        }
+      } catch (err) {
+        console.error('获取业务员电话失败:', err);
+      }
+      
       // 只过滤出当前业务员的客户
       const salesmanCustomers = data.filter(customer => {
         if (!customer) return false;
@@ -996,6 +1102,12 @@ const SalesmanDashboard = () => {
         if (customer.salesman_email) {
           const customerSalesmanEmail = String(customer.salesman_email).toLowerCase();
           return customerSalesmanEmail === salesmanEmail;
+        }
+        
+        // 使用salesman_phone字段匹配业务员电话
+        if (customer.salesman_phone && salesmanPhone) {
+          const customerSalesmanPhone = String(customer.salesman_phone).trim();
+          return customerSalesmanPhone === salesmanPhone;
         }
         
         // 回退到使用salesman字段
@@ -1610,6 +1722,29 @@ const SalesmanDashboard = () => {
       },
     },
     {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      width: 120,
+      render: (status: string) => {
+        // 根据不同状态设置不同颜色
+        let color = 'default';
+        if (status === '提交资料') color = 'blue';
+        else if (status === '技术驳回') color = 'red';
+        else if (status === '商务驳回') color = 'orange';
+        else if (status === '已完成') color = 'green';
+        else if (status === '待处理') color = 'purple';
+        
+        return status ? <Tag color={color}>{status}</Tag> : <Tag color="default">待处理</Tag>;
+      },
+      sorter: (a: Customer, b: Customer) => {
+        if (!a.status && !b.status) return 0;
+        if (!a.status) return 1;
+        if (!b.status) return -1;
+        return a.status.localeCompare(b.status);
+      },
+    },
+    {
       title: '备注',
       dataIndex: 'remarks',
       key: 'remarks',
@@ -1771,10 +1906,15 @@ const SalesmanDashboard = () => {
               <Select 
                 placeholder="选择数据范围" 
                 style={{ width: 200 }}
-                value={viewMode}
+                value={viewMode === 'specific' ? `specific_${selectedSalesman}` : viewMode}
                 onChange={(value) => {
-                  setViewMode(value);
-                  if (value !== 'specific') {
+                  if (typeof value === 'string' && value.startsWith('specific_')) {
+                    const salesmanId = value.replace('specific_', '');
+                    setViewMode('specific');
+                    setSelectedSalesman(salesmanId);
+                    console.log(`选择了特定业务员: ${salesmanId}`);
+                  } else if (value === 'all' || value === 'own' || value === 'subs') {
+                    setViewMode(value);
                     setSelectedSalesman(null);
                   }
                 }}
@@ -1788,12 +1928,8 @@ const SalesmanDashboard = () => {
                     <Select.Option 
                       key={sub.child_id} 
                       value={`specific_${sub.child_id}`}
-                      onClick={() => {
-                        setViewMode('specific');
-                        setSelectedSalesman(sub.child_id);
-                      }}
                     >
-                      {sub.child.name || sub.child.email}
+                      {sub.child.name ? `${sub.child.name} (${sub.child.phone || '无电话'})` : (sub.child.phone || sub.child.email || '未知业务员')}
                     </Select.Option>
                   ))}
                 </Select.OptGroup>

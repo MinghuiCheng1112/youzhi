@@ -155,7 +155,7 @@ const Login = () => {
         </Form.Item>
         
         <div style={{ textAlign: 'center', marginTop: '10px', color: '#888' }}>
-          <small>您可以使用邮箱或手机号码登录系统</small>
+          <small>还没有账号？<a href="/register">点击注册</a></small>
         </div>
       </Form>
     </Card>

@@ -3,7 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { ConfigProvider, App as AntApp, theme, message, Spin } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import { useAuth } from './contexts/AuthContext'
-import { fixRoleConstraint } from './services/supabase'
+import { fixRoleConstraint, createFixRoleConstraintFunction } from './services/supabase'
 
 // 布局组件
 import MainLayout from './layouts/MainLayout'
@@ -11,6 +11,7 @@ import AuthLayout from './layouts/AuthLayout'
 
 // 页面组件
 import Login from './pages/Login'
+import Register from './pages/Register'
 import CustomerList from './pages/CustomerList'
 import CustomerForm from './pages/CustomerForm'
 import ImportCustomers from './pages/ImportCustomers'
@@ -20,6 +21,7 @@ import DrawSystem from './pages/DrawSystem'
 import NotFound from './pages/NotFound'
 import { VerifyEmail } from './pages/VerifyEmail'
 import NewCustomerForm from './pages/NewCustomerForm'
+import PendingRole from './pages/PendingRole'
 
 // 角色特定页面
 import RoleDashboard from './pages/roles/RoleDashboard'
@@ -51,6 +53,11 @@ const RoleRoute = ({
   // 如果未认证，重定向到登录页
   if (!user) {
     return <Navigate to="/login" replace />
+  }
+  
+  // 检查是否为pending角色，如果是则重定向到pending-role页面
+  if (userRole === 'pending') {
+    return <Navigate to="/pending-role" replace />
   }
   
   // 临时解决方案：跳过权限检查，允许访问所有页面
@@ -106,6 +113,15 @@ function App() {
     const fixDatabaseConstraints = async () => {
       try {
         console.log('应用启动：检查并修复数据库角色约束...');
+        
+        // 先创建修复函数，再执行修复
+        try {
+          await createFixRoleConstraintFunction();
+        } catch (createError) {
+          console.warn('创建修复函数失败，尝试直接执行修复:', createError);
+        }
+        
+        // 执行修复
         await fixRoleConstraint();
       } catch (error) {
         console.error('修复数据库角色约束失败:', error);
@@ -136,6 +152,8 @@ function App() {
         return '/dispatch';
       case 'procurement':
         return '/procurement';
+      case 'pending':
+        return '/pending-role';
       default:
         // 一个通用页面，展示基本信息
         return '/dashboard';
@@ -165,8 +183,10 @@ function App() {
         <Routes>
           {/* 公共路由 */}
           <Route path="/login" element={user ? <Navigate to={getDefaultHomePage(userRole || undefined)} replace /> : <AuthLayout><Login /></AuthLayout>} />
+          <Route path="/register" element={user ? <Navigate to={getDefaultHomePage(userRole || undefined)} replace /> : <AuthLayout><Register /></AuthLayout>} />
           <Route path="/404" element={<NotFound />} />
           <Route path="/verify-email" element={<VerifyEmail />} />
+          <Route path="/pending-role" element={userRole === 'pending' ? <PendingRole /> : <Navigate to={getDefaultHomePage(userRole || undefined)} replace />} />
 
           {/* 受保护的路由 */}
           {user ? (

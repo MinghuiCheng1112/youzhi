@@ -88,42 +88,73 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 // 也导出一个简单的admin客户端，但使用相同的密钥
 export const supabaseAdmin = supabase;
 
-// 在初始化完成后修复user_roles表的角色约束
+// 修复角色约束函数
 export const fixRoleConstraint = async () => {
   try {
-    // 1. 检查user_roles表中的角色约束
-    const { data: constraintData, error: constraintError } = await supabase
-      .rpc('get_role_constraint_values');
+    console.log('尝试修复用户角色约束...');
     
-    if (constraintError) {
-      console.error('获取角色约束失败:', constraintError);
-      return;
+    // 执行SQL修改user_roles表的role约束
+    const { error } = await supabase.rpc('fix_role_constraint');
+    
+    if (error) {
+      console.error('修复角色约束失败:', error);
+      throw error;
     }
     
-    console.log('当前角色约束:', constraintData);
-    
-    // 2. 如果约束中不包含surveyor角色，修复约束
-    if (constraintData && (!Array.isArray(constraintData) || !constraintData.includes('surveyor'))) {
-      console.log('需要更新角色约束以包含"surveyor"');
-      
-      // 使用RPC调用修复约束
-      const { error: fixError } = await supabase
-        .rpc('update_role_constraint', { 
-          new_values: ['admin', 'filing_officer', 'salesman', 'warehouse', 
-                       'construction_team', 'grid_connector', 'surveyor', 
-                       'dispatch', 'procurement'] 
-        });
-      
-      if (fixError) {
-        console.error('修复角色约束失败:', fixError);
-      } else {
-        console.log('角色约束已更新，现在包含"surveyor"角色');
-      }
-    } else {
-      console.log('角色约束检查正常，包含所有必要角色');
-    }
+    console.log('角色约束修复成功!');
+    return true;
   } catch (error) {
-    console.error('修复角色约束时出错:', error);
+    console.error('修复角色约束发生异常:', error);
+    throw error;
+  }
+};
+
+// 创建存储过程
+export const createFixRoleConstraintFunction = async () => {
+  try {
+    // 创建修复角色约束的存储过程
+    const { error } = await supabase.rpc('exec_sql', {
+      sql: `
+        CREATE OR REPLACE FUNCTION fix_role_constraint()
+        RETURNS boolean
+        LANGUAGE plpgsql
+        SECURITY DEFINER
+        AS $$
+        BEGIN
+          -- 删除旧约束
+          ALTER TABLE IF EXISTS user_roles 
+          DROP CONSTRAINT IF EXISTS user_roles_role_check;
+          
+          -- 添加新约束，包含pending角色
+          ALTER TABLE IF EXISTS user_roles 
+          ADD CONSTRAINT user_roles_role_check 
+          CHECK (role IN ('admin', 'filing_officer', 'salesman', 'warehouse', 'construction_team', 'grid_connector', 'surveyor', 'dispatch', 'procurement', 'pending'));
+          
+          -- 检查email, name, phone列是否存在，如果不存在则添加
+          BEGIN
+            ALTER TABLE IF EXISTS user_roles ADD COLUMN IF NOT EXISTS email TEXT;
+            ALTER TABLE IF EXISTS user_roles ADD COLUMN IF NOT EXISTS name TEXT;
+            ALTER TABLE IF EXISTS user_roles ADD COLUMN IF NOT EXISTS phone TEXT;
+          EXCEPTION WHEN duplicate_column THEN
+            -- 列已存在，忽略异常
+          END;
+          
+          RETURN true;
+        END;
+        $$;
+      `
+    });
+    
+    if (error) {
+      console.error('创建修复角色约束函数失败:', error);
+      throw error;
+    }
+    
+    console.log('创建修复角色约束函数成功!');
+    return true;
+  } catch (error) {
+    console.error('创建修复角色约束函数出错:', error);
+    throw error;
   }
 };
 

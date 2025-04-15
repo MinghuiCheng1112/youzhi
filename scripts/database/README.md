@@ -83,4 +83,87 @@ describe customers
 
 ## 注意事项
 
-这些脚本直接连接到Supabase的PostgreSQL数据库，绕过了Supabase的API和行级安全策略。因此，这些工具应该只用于开发和调试目的，不应在生产环境中使用。 
+这些脚本直接连接到Supabase的PostgreSQL数据库，绕过了Supabase的API和行级安全策略。因此，这些工具应该只用于开发和调试目的，不应在生产环境中使用。
+
+# 数据库触发器脚本使用说明
+
+本目录包含用于增强数据库功能的触发器和函数脚本。
+
+## auto_update_drawing_change.sql
+
+此脚本实现了一个自动更新图纸变更状态的触发器，具体功能:
+
+- 当组件数量(module_count)字段有值(大于0)时，自动将图纸变更(drawing_change)字段设置为"已出图"
+- 仅在drawing_change字段为"未出图"或null时进行更新，保留其他已存在的值
+- 会自动更新数据库中现有的记录
+
+### 应用方法
+
+#### 本地开发环境
+
+如果使用Supabase本地开发:
+
+```bash
+# 切换到项目根目录
+cd /path/to/customer-management-system
+
+# 使用psql执行SQL脚本
+PGPASSWORD=postgres psql -h localhost -p 54322 -U postgres -d postgres -f scripts/database/auto_update_drawing_change.sql
+```
+
+#### 生产环境
+
+1. 使用Supabase控制台:
+
+   - 登录Supabase控制台 (https://app.supabase.com)
+   - 选择项目
+   - 点击"SQL编辑器"
+   - 复制`auto_update_drawing_change.sql`文件内容
+   - 粘贴到SQL编辑器并执行
+
+2. 使用Supabase CLI:
+
+   ```bash
+   # 确保已安装并配置Supabase CLI
+   supabase login
+   
+   # 链接到您的项目
+   supabase link --project-ref your-project-ref
+   
+   # 执行SQL脚本
+   supabase db execute --file=scripts/database/auto_update_drawing_change.sql
+   ```
+
+3. 直接连接到数据库:
+
+   ```bash
+   # 使用PostgreSQL客户端连接
+   psql "postgresql://postgres:[YOUR-PASSWORD]@db.[YOUR-PROJECT-REF].supabase.co:5432/postgres" -f scripts/database/auto_update_drawing_change.sql
+   ```
+
+### 验证触发器是否生效
+
+执行以下SQL命令验证触发器是否已正确安装:
+
+```sql
+-- 检查触发器是否存在
+SELECT tgname FROM pg_trigger WHERE tgname = 'auto_update_drawing_change_trigger';
+
+-- 测试触发器功能
+BEGIN;
+-- 创建测试记录
+INSERT INTO customers (register_date, customer_name, phone, address, id_card, salesman, module_count, drawing_change)
+VALUES (NOW(), '测试客户', '13800138000', '测试地址', '110101199001010000', '测试业务员', 0, '未出图');
+
+-- 获取新增记录ID
+SELECT id, drawing_change FROM customers WHERE customer_name = '测试客户' ORDER BY created_at DESC LIMIT 1;
+
+-- 更新组件数量，应该自动更新图纸变更状态
+UPDATE customers SET module_count = 10 WHERE customer_name = '测试客户' AND created_at = (SELECT MAX(created_at) FROM customers WHERE customer_name = '测试客户');
+
+-- 查看更新后的状态
+SELECT id, module_count, drawing_change FROM customers WHERE customer_name = '测试客户' ORDER BY created_at DESC LIMIT 1;
+
+-- 回滚事务，不保存测试数据
+ROLLBACK;
+``` 

@@ -175,6 +175,7 @@ const NewCustomerForm = () => {
             // 设置业务员电话
             if (data.phone && !formattedValues.salesman_phone) {
               formattedValues.salesman_phone = data.phone;
+              console.log('自动设置业务员电话:', data.phone);
             }
           } else {
             // 如果没有找到业务员真实姓名，标记为"未知业务员"

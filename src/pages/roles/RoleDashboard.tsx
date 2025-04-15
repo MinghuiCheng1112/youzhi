@@ -30,6 +30,7 @@ interface UserWithRole {
   role_id: number
   created_at: string
   last_sign_in: string
+  isPending: boolean
 }
 
 // 可用的角色选项
@@ -42,7 +43,8 @@ const ROLE_OPTIONS = [
   { label: '派工员', value: 'dispatch' },
   { label: '施工队', value: 'construction_team' },
   { label: '并网员', value: 'grid_connector' },
-  { label: '采购员', value: 'procurement' }
+  { label: '采购员', value: 'procurement' },
+  { label: '待分配角色', value: 'pending' }
 ];
 
 const RoleDashboard = () => {
@@ -183,7 +185,9 @@ const RoleDashboard = () => {
           name: userRole.name || '',
           phone: userRole.phone || '',
           created_at: userRole.created_at || new Date().toISOString(),
-          last_sign_in: userLoginInfo[userId]?.last_sign_in || '-'
+          last_sign_in: userLoginInfo[userId]?.last_sign_in || '-',
+          // 添加待分配角色的标记
+          isPending: userRole.role === 'pending'
         };
       });
 
@@ -801,8 +805,25 @@ const RoleDashboard = () => {
       title: '角色名称',
       dataIndex: 'role',
       key: 'roleName',
-      render: (role: string) => {
+      render: (role: string, record: UserWithRole) => {
         const roleOption = ROLE_OPTIONS.find(option => option.value === role);
+        // 给待分配角色用户添加高亮
+        if (role === 'pending' || record.isPending) {
+          return <span style={{ color: '#ff4d4f', fontWeight: 'bold' }}>
+            {roleOption ? roleOption.label : role}
+            <span style={{ 
+              display: 'inline-block',
+              marginLeft: '5px',
+              padding: '0 8px', 
+              fontSize: '12px', 
+              lineHeight: '20px', 
+              backgroundColor: '#fff1f0', 
+              border: '1px solid #ffccc7', 
+              borderRadius: '4px',
+              color: '#ff4d4f' 
+            }}>新注册用户</span>
+          </span>;
+        }
         return roleOption ? roleOption.label : role;
       },
     },
@@ -983,7 +1004,18 @@ const RoleDashboard = () => {
               loading={dataLoading}
               pagination={false}
               locale={{ emptyText: '暂无数据' }}
+              rowClassName={(record: UserWithRole) => record.role === 'pending' || record.isPending ? 'pending-user-row' : ''}
             />
+            
+            {/* 自定义行样式 */}
+            <style>{`
+              .pending-user-row {
+                background-color: rgba(255, 77, 79, 0.05);
+              }
+              .pending-user-row:hover td {
+                background-color: rgba(255, 77, 79, 0.1) !important;
+              }
+            `}</style>
         
             {users.length === 0 && !dataLoading && (
               <div style={{ textAlign: 'center', marginTop: 20 }}>
@@ -1168,7 +1200,7 @@ const RoleDashboard = () => {
           
           {/* 下级业务员管理模态框 */}
           <Modal
-            title={`管理 ${currentSalesman?.name ? `${currentSalesman.name} (${currentSalesman.email})` : currentSalesman?.email || ''} 的下级业务员`}
+            title={`管理 ${currentSalesman?.name ? `${currentSalesman.name} (${currentSalesman.phone || '无电话'})` : currentSalesman?.phone || currentSalesman?.email || ''} 的下级业务员`}
             open={isSubordinateModalVisible}
             onCancel={() => {
               setIsSubordinateModalVisible(false)
@@ -1210,7 +1242,7 @@ const RoleDashboard = () => {
                       )
                       .map(u => (
                         <Option key={u.id} value={u.id}>
-                          {u.name ? `${u.name} (${u.email})` : u.email}
+                          {u.name ? `${u.name} (${u.phone || '无电话'})` : u.phone || u.email || '-'}
                         </Option>
                     ))}
                   </Select>
@@ -1234,12 +1266,12 @@ const RoleDashboard = () => {
                 pagination={false}
                 columns={[
                   {
-                    title: '业务员邮箱',
-                    dataIndex: 'email',
-                    key: 'email',
-                    render: (email, record) => {
+                    title: '业务员电话',
+                    dataIndex: 'phone',
+                    key: 'phone',
+                    render: (phone, record) => {
                       const user = users.find(u => u.id === record.id);
-                      return email || user?.email || record.id;
+                      return phone || user?.phone || '-';
                     }
                   },
                   {

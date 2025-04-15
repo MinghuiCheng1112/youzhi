@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Table, Card, Input, Button, Typography, Space, message, Row, Col, Statistic, Tag, Tooltip, Progress, Empty } from 'antd'
+import { Table, Card, Input, Button, Typography, Space, message, Row, Col, Statistic, Tag, Tooltip, Progress, Empty, Alert } from 'antd'
 import { SearchOutlined, ExportOutlined, ReloadOutlined, UserOutlined, FileTextOutlined, DollarOutlined, AreaChartOutlined, PieChartOutlined } from '@ant-design/icons'
 import { customerApi } from '../../services/api'
 import { Customer } from '../../types'
@@ -33,6 +33,7 @@ const FilingOfficerDashboard = () => {
   const [filteredCustomers, setFilteredCustomers] = useState<ExtendedCustomer[]>([])
   const [loading, setLoading] = useState(true)
   const [searchText, setSearchText] = useState('')
+  const [generatedText, setGeneratedText] = useState<string>('')
   const [stats, setStats] = useState({
     total: 0,
     filedCount: 0,
@@ -152,9 +153,18 @@ const FilingOfficerDashboard = () => {
   // 根据搜索关键词筛选客户
   useEffect(() => {
     if (searchText.trim()) {
-      setFilteredCustomers(applySearchFilter(customers, searchText))
+      const filtered = applySearchFilter(customers, searchText)
+      setFilteredCustomers(filtered)
+      
+      // 当搜索结果小于等于5人时，生成文本
+      if (filtered.length > 0 && filtered.length <= 5) {
+        generateSearchResultText(filtered, searchText);
+      } else {
+        setGeneratedText('');
+      }
     } else {
       setFilteredCustomers(customers)
+      setGeneratedText('');
     }
   }, [customers, searchText])
 
@@ -209,15 +219,14 @@ const FilingOfficerDashboard = () => {
       const salesman = (customer.salesman || '').toLowerCase();
       const constructionTeam = (customer.construction_team || '').toLowerCase();
       
-      // 每个关键词都要求精准匹配各个字段
-      // 例如，输入"张三"会匹配姓名为"张三"而不是"张三丰"的客户
+      // 改为包含匹配而不是精确匹配
       return keywords.some(keyword => 
-        customerName === keyword || 
-        phone === keyword || 
-        address === keyword || 
-        idCard === keyword || 
-        salesman === keyword || 
-        constructionTeam === keyword
+        customerName.includes(keyword) || 
+        phone.includes(keyword) || 
+        address.includes(keyword) || 
+        idCard.includes(keyword) || 
+        salesman.includes(keyword) || 
+        constructionTeam.includes(keyword)
       );
     });
   }
@@ -271,6 +280,52 @@ const FilingOfficerDashboard = () => {
       console.error(error)
     }
   }
+
+  // 新增：生成搜索结果文本
+  const generateSearchResultText = (filtered: ExtendedCustomer[], searchText: string) => {
+    // 项目信息
+    const projectInfo = "本项目由汇智(北京)能源有限公司舞阳分公司投资建设，由河南祐之新能源科技有限公司负责运营维护。\n";
+    
+    // 获取搜索关键词数组
+    const keywords = searchText.toLowerCase().split(/[\s,，]+/).filter(k => k.trim() !== '');
+    
+    // 对客户按照搜索关键词的顺序进行排序
+    const sortedCustomers = [...filtered].sort((a, b) => {
+      const aName = (a.customer_name || '').toLowerCase();
+      const bName = (b.customer_name || '').toLowerCase();
+      
+      // 找到关键词在姓名中的位置
+      const aIndex = keywords.findIndex(keyword => aName.includes(keyword));
+      const bIndex = keywords.findIndex(keyword => bName.includes(keyword));
+      
+      // 若都匹配到了关键词，则按关键词顺序排序
+      if (aIndex !== -1 && bIndex !== -1) {
+        return aIndex - bIndex;
+      }
+      
+      // 如果只有一个匹配到了关键词，则它应该排在前面
+      if (aIndex !== -1) return -1;
+      if (bIndex !== -1) return 1;
+      
+      // 如果都没匹配到或其他情况，保持原顺序
+      return 0;
+    });
+    
+    // 客户信息部分
+    let customerInfos = sortedCustomers.map((customer, index) => {
+      const filingCapacity = customer.filing_capacity || (customer.module_count ? parseFloat(((customer.module_count + 5) * 0.71).toFixed(2)) : '-');
+      return `${index + 1}${customer.customer_name}，${filingCapacity}KW，${customer.address || '-'}，身份证：${customer.id_card || '-'}，电话${customer.phone || '-'}，全额上网；`;
+    }).join('');
+    
+    // 将最后一个分号替换为句号
+    if (customerInfos.length > 0) {
+      customerInfos = customerInfos.replace(/；$/, '。');
+    }
+    
+    // 生成完整文本
+    const text = projectInfo + customerInfos;
+    setGeneratedText(text);
+  };
 
   // 表格列定义
   const columns = [
@@ -514,6 +569,27 @@ const FilingOfficerDashboard = () => {
           </Text>
         </Space>
       </div>
+
+      {/* 生成的文本区域 */}
+      {generatedText && (
+        <Alert
+          message="搜索结果文本"
+          description={
+            <div>
+              <p style={{ whiteSpace: 'pre-line' }}>{generatedText}</p>
+              <Button type="primary" size="small" onClick={() => {
+                navigator.clipboard.writeText(generatedText);
+                message.success('已复制到剪贴板');
+              }}>
+                复制文本
+              </Button>
+            </div>
+          }
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+      )}
 
       <Card 
         style={{ 

@@ -143,18 +143,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // 如果查询出错或没有结果，返回默认角色
         console.log('未找到用户角色，使用默认角色');
         delete fetchingRoleRef.current[userId];
-        return 'admin'; // 临时使用管理员角色绕过权限检查
+        return 'pending'; // 返回待分配角色以便管理员处理
         
       } catch (error) {
         console.error('查询用户角色时出现异常:', error);
         delete fetchingRoleRef.current[userId];
-        return 'admin'; // 临时使用管理员角色确保界面可用
+        return 'pending'; // 返回待分配角色以便管理员处理
       }
       
     } catch (err) {
       console.error('获取用户角色时发生异常:', err);
       delete fetchingRoleRef.current[userId];
-      return 'admin'; // 确保即使出错也返回一个默认角色
+      return 'pending'; // 返回待分配角色以便管理员处理
     }
   }
 

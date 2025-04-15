@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:with-psql": "powershell -Command \"$env:PATH += ';C:\\Program Files\\PostgreSQL\\17\\bin'; npm run dev\"",
     "build": "tsc --skipLibCheck --noEmit && vite build",
     "netlify-build": "node netlify-env-check.js && npm run build && node copy-env-script.js",
     "vercel-build": "node vercel-env-check.js && vite build --mode production",

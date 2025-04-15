@@ -374,9 +374,16 @@ export const customerApi = {
    * @returns {Promise<Customer>} 创建成功的客户对象
    */
   create: async (customer: CreateCustomerInput): Promise<Customer> => {
+    // 检查客户对象中是否存在salesman_email字段，如果存在则删除
+    const customerData = { ...customer };
+    if ('salesman_email' in customerData) {
+      console.log('检测到salesman_email字段，从插入数据中移除');
+      delete (customerData as any).salesman_email;
+    }
+
     const { data, error } = await supabase
       .from('customers')
-      .insert([customer])
+      .insert([customerData])
       .select()
       .single()
 
@@ -451,6 +458,12 @@ export const customerApi = {
     });
     
     console.log('创建客户最终数据:', JSON.stringify(processedCustomer));
+    
+    // 检查是否存在salesman_email字段
+    if ('salesman_email' in processedCustomer) {
+      console.log('警告: createWithCache中仍存在salesman_email字段，值为:', (processedCustomer as any).salesman_email);
+      console.log('业务员电话字段值为:', processedCustomer.salesman_phone || '未设置');
+    }
     
     // 同步立即创建客户，不使用异步处理
     try {
