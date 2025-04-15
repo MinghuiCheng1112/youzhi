@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { message } from 'antd';
-import { useSupabase } from '../contexts/SupabaseContext';
+import { useSupabase } from '../../contexts/SupabaseContext';
 
 const NewCustomerForm = () => {
   const supabase = useSupabase();
   const [form] = useState(null);
   const [userData] = useState(null);
   const [userRole] = useState('salesman');
-  const [setSubmitting] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async () => {
     try {
