@@ -452,9 +452,9 @@ const CustomerList = () => {
       if (trimmed === '') {
         setFilteredCustomers(dateFilteredCustomers);
         setTotalPages(Math.ceil(dateFilteredCustomers.length / pageSize));
-        setCurrentPage(1); // 重置到第一页
-        return;
-      }
+      setCurrentPage(1); // 重置到第一页
+      return;
+    }
 
     // 支持空格或逗号分隔的多关键词搜索
       const keywords = trimmed.split(/[\s,，]+/)
@@ -466,7 +466,7 @@ const CustomerList = () => {
         setCurrentPage(1); // 重置到第一页
         return;
       }
-      
+    
     // 获取启用的搜索字段
     const enabledFields = Object.entries(searchFields)
       .filter(([_, enabled]) => enabled)
