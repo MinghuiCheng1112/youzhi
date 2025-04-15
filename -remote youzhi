@@ -1,0 +1,7 @@
+safe.directory=D:/customer-management-system
+http.sslverify=false
+init.defaultbranch=main
+core.autocrlf=true
+core.editor=code --wait
+user.name=MinghuiCheng1112
+user.email=1650439168@qq.com
