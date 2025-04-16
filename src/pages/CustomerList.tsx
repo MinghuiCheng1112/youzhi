@@ -500,7 +500,7 @@ const CustomerList = () => {
       </Row>
     </div>
   );
-
+  
   // 使用立即处理的方式代替防抖，避免延迟
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -1730,11 +1730,11 @@ const CustomerList = () => {
                 editForm.setFieldsValue({ construction_team_phone: teamPhone });
                 break;
               case 'drawing_change':
-                // 如果为空，设置为默认值
+              // 如果为空，设置为默认值
                 if (value === null || value === undefined || value === '' || 
                     (Array.isArray(value) && value.length === 0)) {
-                  editForm.setFieldsValue({ drawing_change: '未出图' });
-                }
+                editForm.setFieldsValue({ drawing_change: '未出图' });
+              }
                 break;
             }
           }}
@@ -4840,8 +4840,8 @@ const CustomerList = () => {
       if (error instanceof Error) {
         message.error(`更新失败: ${error.message}`);
       } else {
-        message.error('操作失败，请重试');
-      }
+      message.error('操作失败，请重试');
+    }
       
       // 失败时重新获取数据
       fetchCustomers();
