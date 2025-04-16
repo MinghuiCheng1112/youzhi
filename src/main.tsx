@@ -5,7 +5,6 @@ import { QueryClient, QueryClientProvider } from 'react-query'
 import App from './App.tsx'
 import './index.css'
 import { AuthProvider } from './contexts/AuthContext'
-import { SupabaseProvider } from './contexts/SupabaseContext'
 import ensureDatabaseStructure from './utils/checkDatabase'
 import dayjs from 'dayjs'
 import 'dayjs/locale/zh-cn'
@@ -24,11 +23,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <SupabaseProvider>
-          <AuthProvider>
-            <App />
-          </AuthProvider>
-        </SupabaseProvider>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
       </BrowserRouter>
     </QueryClientProvider>
   </React.StrictMode>,

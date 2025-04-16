@@ -216,13 +216,6 @@ const TableHeaderFilter: React.FC<TableHeaderFilterProps> = ({
               />
             </Tooltip>
           </Space>
-          
-          <Button
-            size="small"
-            onClick={handleClearFilter}
-          >
-            清除筛选
-          </Button>
         </div>
       </div>
 
@@ -295,13 +288,6 @@ const TableHeaderFilter: React.FC<TableHeaderFilterProps> = ({
               />
             </Tooltip>
           </Space>
-          
-          <Button
-            size="small"
-            onClick={handleClearFilter}
-          >
-            清除筛选
-          </Button>
         </div>
       </div>
     },

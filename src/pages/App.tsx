@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { ConfigProvider, App as AntApp, theme, message, Spin } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
-import { useAuth } from '../contexts/AuthContext'
-import { fixRoleConstraint, createFixRoleConstraintFunction } from '../services/supabase'
+import { useAuth } from './contexts/AuthContext'
+import { fixRoleConstraint, createFixRoleConstraintFunction } from './services/supabase'
 
 // 布局组件
 

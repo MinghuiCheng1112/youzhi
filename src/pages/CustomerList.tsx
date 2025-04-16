@@ -215,6 +215,9 @@ const CustomerList = () => {
   const [registerDateRange, setRegisterDateRange] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null] | null>(null);
   const [filingDateRange, setFilingDateRange] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null] | null>(null);
 
+  // 添加activeFilters状态来跟踪当前激活的筛选条件
+  const [activeFilters, setActiveFilters] = useState<{[key: string]: string[]}>({});
+
   useEffect(() => {
     fetchCustomers()
     fetchConstructionTeams()
@@ -407,103 +410,30 @@ const CustomerList = () => {
 
   // 优化的搜索函数
   const performSearch = (value: string) => {
-    const isSearching = true;
+    // 设置搜索状态
+    setIsSearching(true);
+    setSearchText(value);
     
     try {
-      const trimmed = value.trim();
-      
-      // 检查是否有任何筛选条件
-      if (trimmed === '' && !registerDateRange && !filingDateRange) {
-        // 如果没有搜索关键词和日期筛选，恢复全部数据
-        setFilteredCustomers(customers);
-        setTotalPages(Math.ceil(customers.length / pageSize));
-        setCurrentPage(1); // 重置到第一页
-        return;
-      }
-      
-      // 先按日期范围筛选客户
-      let dateFilteredCustomers = [...customers];
-      
-      // 按登记日期筛选
-      if (registerDateRange && registerDateRange[0] && registerDateRange[1]) {
-        const startDate = registerDateRange[0].startOf('day');
-        const endDate = registerDateRange[1].endOf('day');
-        
-        dateFilteredCustomers = dateFilteredCustomers.filter(customer => {
-          if (!customer.register_date) return false;
-          const customerDate = dayjs(customer.register_date);
-          return customerDate.isAfter(startDate) && customerDate.isBefore(endDate);
-        });
-      }
-      
-      // 按备案日期筛选
-      if (filingDateRange && filingDateRange[0] && filingDateRange[1]) {
-        const startDate = filingDateRange[0].startOf('day');
-        const endDate = filingDateRange[1].endOf('day');
-        
-        dateFilteredCustomers = dateFilteredCustomers.filter(customer => {
-          if (!customer.filing_date) return false;
-          const customerDate = dayjs(customer.filing_date);
-          return customerDate.isAfter(startDate) && customerDate.isBefore(endDate);
-        });
-      }
-      
-      // 如果没有搜索关键词，只进行日期筛选
-      if (trimmed === '') {
-        setFilteredCustomers(dateFilteredCustomers);
-        setTotalPages(Math.ceil(dateFilteredCustomers.length / pageSize));
-        setCurrentPage(1); // 重置到第一页
-        return;
-      }
-      
-      // 支持空格或逗号分隔的多关键词搜索
-      const keywords = trimmed.split(/[\s,，]+/)
-        .filter(keyword => keyword.trim() !== ''); // 过滤掉空字符串
-      
-      if (keywords.length === 0) {
-        setFilteredCustomers(dateFilteredCustomers);
-        setTotalPages(Math.ceil(dateFilteredCustomers.length / pageSize));
-        setCurrentPage(1); // 重置到第一页
-        return;
-      }
-      
-      // 获取启用的搜索字段
-      const enabledFields = Object.entries(searchFields)
-        .filter(([_, enabled]) => enabled)
-        .map(([field]) => field);
-      
-      // 如果没有启用任何字段，使用默认字段
-      if (enabledFields.length === 0) {
-        enabledFields.push('customer_name', 'phone', 'address', 'salesman', 'id_card', 'meter_number');
-      }
-      
-      // 在日期筛选结果的基础上进行关键词筛选
-      const filtered = dateFilteredCustomers.filter(customer => {
-        // 检查启用的每个字段
-        return keywords.some(keyword => 
-          enabledFields.some(field => {
-            const fieldValue = ((customer as any)[field] || '').toString().toLowerCase();
-            return fieldValue.includes(keyword.toLowerCase());
-          })
-        );
-      });
-      
-      setFilteredCustomers(filtered);
-      setTotalPages(Math.ceil(filtered.length / pageSize));
-      setCurrentPage(1); // 重置到第一页
+      // 应用所有筛选，包括新的搜索文本
+      applyAllFilters();
     } catch (error) {
-      console.error('搜索出错:', error);
+      console.error('搜索错误:', error);
       message.error('搜索过程中出现错误');
+    } finally {
+      setIsSearching(false);
     }
   };
   
   // 处理日期范围变化
   const handleRegisterDateChange = (dates: [dayjs.Dayjs | null, dayjs.Dayjs | null] | null) => {
     setRegisterDateRange(dates);
+    // 不立即应用筛选，等待用户点击"应用筛选"按钮
   };
   
   const handleFilingDateChange = (dates: [dayjs.Dayjs | null, dayjs.Dayjs | null] | null) => {
     setFilingDateRange(dates);
+    // 不立即应用筛选，等待用户点击"应用筛选"按钮
   };
   
   // 清除所有筛选条件
@@ -511,7 +441,11 @@ const CustomerList = () => {
     setRegisterDateRange(null);
     setFilingDateRange(null);
     setSearchText('');
-    performSearch('');
+    setActiveFilters({});
+    // 恢复到原始数据
+    setFilteredCustomers([...customers]);
+    populatePageCache(customers, pageSize);
+    setTotalPages(Math.ceil(customers.length / pageSize));
   };
   
   // 添加日期筛选组件
@@ -2136,30 +2070,32 @@ const CustomerList = () => {
                 (b.customer_name || '').localeCompare(a.customer_name || '')
               ));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['customer_name'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['customer_name'] = selectedValues;
             }
             
-            // 筛选客户姓名
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.customer_name || '')
-              )
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['customer_name'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -2198,30 +2134,32 @@ const CustomerList = () => {
                 (b.address || '').localeCompare(a.address || '')
               ));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['address'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['address'] = selectedValues;
             }
             
-            // 筛选客户地址
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.address || '')
-              )
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['address'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -2259,30 +2197,32 @@ const CustomerList = () => {
                 (b.salesman || '').localeCompare(a.salesman || '')
               ));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['salesman'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['salesman'] = selectedValues;
             }
             
-            // 筛选业务员
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.salesman || '')
-              )
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['salesman'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -2357,30 +2297,32 @@ const CustomerList = () => {
                 (b.designer || '').localeCompare(a.designer || '')
               ));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['designer'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['designer'] = selectedValues;
             }
             
-            // 筛选设计师
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.designer || '')
-              )
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['designer'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -2417,30 +2359,32 @@ const CustomerList = () => {
                 (b.surveyor || '').localeCompare(a.surveyor || '')
               ));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['surveyor'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['surveyor'] = selectedValues;
             }
             
-            // 筛选踏勘员
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.surveyor || '')
-              )
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['surveyor'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -2491,33 +2435,32 @@ const CustomerList = () => {
                 return bValue.localeCompare(aValue);
               }));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['station_management'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['station_management'] = selectedValues;
             }
             
-            // 筛选补充资料
-            setFilteredCustomers(
-              customers.filter(customer => {
-                const value = Array.isArray(customer.station_management) 
-                  ? customer.station_management.join(',') 
-                  : (customer.station_management || '');
-                return selectedValues.includes(value);
-              })
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['station_management'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -2580,30 +2523,32 @@ const CustomerList = () => {
                   .localeCompare(typeof a.drawing_change === 'string' ? a.drawing_change : '未出图')
               ));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['drawing_change'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['drawing_change'] = selectedValues;
             }
             
-            // 筛选图纸变更
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(typeof customer.drawing_change === 'string' ? customer.drawing_change : '未出图')
-              )
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['drawing_change'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -2690,30 +2635,32 @@ const CustomerList = () => {
         return new Date(b.urge_order).getTime() - new Date(a.urge_order).getTime();
               }));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['urge_order'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['urge_order'] = selectedValues;
             }
             
-            // 筛选催单日期
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.urge_order ? dayjs(customer.urge_order).format('MM-DD HH:mm') : '')
-              )
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['urge_order'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -2771,30 +2718,32 @@ const CustomerList = () => {
             } else if (direction === 'descend') {
               setFilteredCustomers([...filteredCustomers].sort((a, b) => (b.module_count || 0) - (a.module_count || 0)));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['module_count'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['module_count'] = selectedValues;
             }
             
-            // 筛选组件数量
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.module_count ? customer.module_count.toString() : '')
-              )
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['module_count'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -2824,30 +2773,32 @@ const CustomerList = () => {
             } else if (direction === 'descend') {
               setFilteredCustomers([...filteredCustomers].sort((a, b) => (b.capacity || 0) - (a.capacity || 0)));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['capacity'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['capacity'] = selectedValues;
             }
             
-            // 筛选容量
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.capacity ? customer.capacity.toString() : '')
-              )
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['capacity'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -2891,30 +2842,32 @@ const CustomerList = () => {
                 (b.inverter || '').localeCompare(a.inverter || '')
               ));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['inverter'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['inverter'] = selectedValues;
             }
             
-            // 筛选逆变器
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.inverter || '')
-              )
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['inverter'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -2964,30 +2917,32 @@ const CustomerList = () => {
                 (b.copper_wire || '').localeCompare(a.copper_wire || '')
               ));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['copper_wire'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['copper_wire'] = selectedValues;
             }
             
-            // 筛选铜线
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.copper_wire || '')
-              )
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['copper_wire'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -3036,30 +2991,32 @@ const CustomerList = () => {
                 (b.aluminum_wire || '').localeCompare(a.aluminum_wire || '')
               ));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['aluminum_wire'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['aluminum_wire'] = selectedValues;
             }
             
-            // 筛选铝线
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.aluminum_wire || '')
-              )
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['aluminum_wire'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -3108,30 +3065,32 @@ const CustomerList = () => {
                 (b.distribution_box || '').localeCompare(a.distribution_box || '')
               ));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['distribution_box'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['distribution_box'] = selectedValues;
             }
             
-            // 筛选配电箱
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.distribution_box || '')
-              )
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['distribution_box'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -3200,31 +3159,32 @@ const CustomerList = () => {
                 return bStatus.localeCompare(aStatus);
               }));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['square_steel_status'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['square_steel_status'] = selectedValues;
             }
             
-            // 筛选方钢状态
-            setFilteredCustomers(
-              customers.filter(customer => {
-                const status = getSquareSteelStatus(customer);
-                return selectedValues.includes(status);
-              })
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['square_steel_status'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -3301,31 +3261,32 @@ const CustomerList = () => {
                 return bStatus.localeCompare(aStatus);
               }));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['component_status'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['component_status'] = selectedValues;
             }
             
-            // 筛选组件状态
-            setFilteredCustomers(
-              customers.filter(customer => {
-                const status = getComponentStatus(customer);
-                return selectedValues.includes(status);
-              })
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['component_status'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -3411,30 +3372,32 @@ const CustomerList = () => {
                 (b.construction_team || '').localeCompare(a.construction_team || '')
               ));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['construction_team'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['construction_team'] = selectedValues;
             }
             
-            // 筛选施工队
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.construction_team || '')
-              )
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['construction_team'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -3512,30 +3475,32 @@ const CustomerList = () => {
                 return bStatus - aStatus;
               }));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['construction_status'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['construction_status'] = selectedValues;
             }
             
-            // 筛选施工状态
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.construction_status ? '已完工' : '未完工')
-              )
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['construction_status'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -3592,30 +3557,32 @@ const CustomerList = () => {
                 (b.main_line || '').localeCompare(a.main_line || '')
               ));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['main_line'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['main_line'] = selectedValues;
             }
             
-            // 筛选大线
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.main_line || '')
-              )
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['main_line'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -3658,33 +3625,32 @@ const CustomerList = () => {
                 return bStatus - aStatus;
               }));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['technical_review_status'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['technical_review_status'] = selectedValues;
             }
             
-            // 筛选技术审核状态
-            setFilteredCustomers(
-              customers.filter(customer => {
-                const status = customer.technical_review_status === 'approved' ? '审核通过' : 
-                               customer.technical_review_status === 'rejected' ? '技术驳回' : 
-                               '待审核';
-                return selectedValues.includes(status);
-              })
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['technical_review_status'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -3789,30 +3755,32 @@ const CustomerList = () => {
                 return bStatus - aStatus;
               }));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['upload_to_grid'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['upload_to_grid'] = selectedValues;
             }
             
-            // 筛选上传国网状态
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.upload_to_grid ? '已上传' : '未上传')
-              )
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['upload_to_grid'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -3882,30 +3850,32 @@ const CustomerList = () => {
                 return bStatus - aStatus;
               }));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['construction_acceptance_date'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['construction_acceptance_date'] = selectedValues;
             }
             
-            // 筛选建设验收状态
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.construction_acceptance_date ? '已推到' : '未推到')
-              )
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['construction_acceptance_date'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -3973,30 +3943,32 @@ const CustomerList = () => {
                 return bStatus - aStatus;
               }));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['meter_installation_date'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['meter_installation_date'] = selectedValues;
             }
             
-            // 筛选挂表状态
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.meter_installation_date ? '已挂表' : '未挂表')
-              )
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['meter_installation_date'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -4066,30 +4038,32 @@ const CustomerList = () => {
                 return bStatus - aStatus;
               }));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['power_purchase_contract'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['power_purchase_contract'] = selectedValues;
             }
             
-            // 筛选购售电合同状态
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.power_purchase_contract ? '已出合同' : '待出')
-              )
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['power_purchase_contract'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -4159,31 +4133,32 @@ const CustomerList = () => {
                 return bStatus - aStatus;
               }));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['status'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['status'] = selectedValues;
             }
             
-            // 筛选状态
-            setFilteredCustomers(
-              customers.filter(customer => {
-                const status = customer.status || '待处理';
-                return selectedValues.includes(status);
-              })
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['status'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -4221,7 +4196,7 @@ const CustomerList = () => {
         } else if (value === "技术驳回" || value === "商务驳回") {
           return <Tag 
             color="error"
-            style={{ cursor: 'pointer' }}
+              style={{ cursor: 'pointer' }}
             onClick={() => record.id && showStatusOptions(record.id, value)}
           >
             {value}
@@ -4272,30 +4247,32 @@ const CustomerList = () => {
                 return bVal - aVal;
               }));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['price'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['price'] = selectedValues;
             }
             
-            // 筛选价格
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.price != null ? String(customer.price) : '')
-              )
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['price'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -4324,30 +4301,32 @@ const CustomerList = () => {
                 (b.company || '').localeCompare(a.company || '')
               ));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['company'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['company'] = selectedValues;
             }
             
-            // 筛选公司
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.company || '')
-              )
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['company'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -4387,30 +4366,32 @@ const CustomerList = () => {
                 (b.remarks || '').localeCompare(a.remarks || '')
               ));
             } else {
-              // 重置排序
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
             }
           }}
           onFilter={(selectedValues) => {
+            // 更新此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            
             if (selectedValues.length === 0) {
-              // 重置筛选
-              setFilteredCustomers([...customers]);
-              performSearch(searchText);
-              return;
+              // 如果没有选择值，删除此字段的筛选条件
+              delete newActiveFilters['remarks'];
+            } else {
+              // 否则更新此字段的筛选条件
+              newActiveFilters['remarks'] = selectedValues;
             }
             
-            // 筛选备注
-            setFilteredCustomers(
-              customers.filter(customer => 
-                selectedValues.includes(customer.remarks || '')
-              )
-            );
+            // 更新激活的筛选条件并应用所有筛选
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
           onClear={() => {
-            // 清除筛选
-            setFilteredCustomers([...customers]);
-            performSearch(searchText);
+            // 清除此字段的筛选条件
+            const newActiveFilters = { ...activeFilters };
+            delete newActiveFilters['remarks'];
+            setActiveFilters(newActiveFilters);
+            applyAllFilters(newActiveFilters);
           }}
         />
       ),
@@ -5055,18 +5036,29 @@ const CustomerList = () => {
       <Space>
         <Input
           style={{ width: 200 }}
-          placeholder="搜索客户姓名"
+          placeholder="搜索客户姓名 (多关键词用空格或逗号分隔)"
           allowClear
           prefix={<SearchOutlined />}
           onChange={(e) => {
             const value = e.target.value;
-            // 只搜索客户姓名字段
+            // 搜索客户姓名字段，支持空格或逗号分隔的多关键词
             if (value.trim() === '') {
               setFilteredCustomers(customers);
             } else {
-              const filtered = customers.filter(customer => 
-                customer.customer_name && customer.customer_name.toLowerCase().includes(value.toLowerCase())
-              );
+              // 支持空格或逗号分隔的多关键词搜索
+              const keywords = value.toLowerCase()
+                .split(/[\s,，]+/) // 按空格或中英文逗号分隔
+                .filter(keyword => keyword.trim() !== ''); // 过滤掉空字符串
+              
+              // 只要包含任一关键词即匹配成功
+              const filtered = customers.filter(customer => {
+                if (!customer.customer_name) return false;
+                const name = customer.customer_name.toLowerCase();
+                
+                // 对每个关键词进行检查，只要有一个关键词匹配就返回true
+                return keywords.some(keyword => name.includes(keyword));
+              });
+              
               setFilteredCustomers(filtered);
             }
           }}
@@ -5096,7 +5088,7 @@ const CustomerList = () => {
           导出数据
           </Button>
         </Space>
-    </div>
+      </div>
   )
 
   // 添加一个专门用于踏勘员的可编辑单元格
@@ -6139,6 +6131,7 @@ const CustomerList = () => {
           <div style={{ marginTop: 16 }}>
             <p>当前搜索内容：{searchText || '(无)'}</p>
             <p>当前将在{selectedCount}个字段中进行搜索</p>
+            <p style={{ color: '#1890ff' }}>支持多关键词搜索：使用空格或逗号分隔多个关键词，系统将返回包含任一关键词的结果</p>
           </div>
         </div>
       </Modal>
@@ -6147,6 +6140,137 @@ const CustomerList = () => {
 
   // 在组件顶部添加搜索状态
   const [isSearching, setIsSearching] = useState(false);
+
+  // 添加应用所有筛选条件的函数
+  const applyAllFilters = (filters = activeFilters) => {
+    // 应用日期范围筛选
+    let result = [...customers];
+    
+    // 应用日期筛选
+    if (registerDateRange && registerDateRange[0] && registerDateRange[1]) {
+      result = result.filter(customer => {
+        const registerDate = customer.register_date ? dayjs(customer.register_date) : null;
+        if (!registerDate || !registerDate.isValid()) return false;
+        
+        return !registerDate.isBefore(registerDateRange[0], 'day') && 
+               !registerDate.isAfter(registerDateRange[1], 'day');
+      });
+    }
+    
+    if (filingDateRange && filingDateRange[0] && filingDateRange[1]) {
+      result = result.filter(customer => {
+        const filingDate = customer.filing_date ? dayjs(customer.filing_date) : null;
+        if (!filingDate || !filingDate.isValid()) return false;
+        
+        return !filingDate.isBefore(filingDateRange[0], 'day') && 
+               !filingDate.isAfter(filingDateRange[1], 'day');
+      });
+    }
+    
+    // 应用所有字段筛选条件
+    Object.entries(filters).forEach(([field, values]) => {
+      if (values && values.length > 0) {
+        result = result.filter(customer => {
+          // 特殊字段处理
+          switch(field) {
+            case 'square_steel_status':
+              // 方钢出库状态
+              return values.includes(getSquareSteelStatus(customer));
+              
+            case 'component_status':
+              // 组件出库状态
+              return values.includes(getComponentStatus(customer));
+              
+            case 'construction_status':
+              // 施工状态
+              return values.includes(customer.construction_status ? '已完工' : '未完工');
+              
+            case 'technical_review_status':
+              // 技术审核状态
+              const techStatus = customer.technical_review_status === 'approved' ? '审核通过' : 
+                               customer.technical_review_status === 'rejected' ? '技术驳回' : 
+                               '待审核';
+              return values.includes(techStatus);
+              
+            case 'upload_to_grid':
+              // 上传国网状态
+              return values.includes(customer.upload_to_grid ? '已上传' : '未上传');
+              
+            case 'construction_acceptance_date':
+              // 建设验收状态
+              return values.includes(customer.construction_acceptance_date ? '已推到' : '未推到');
+              
+            case 'meter_installation_date':
+              // 挂表状态
+              return values.includes(customer.meter_installation_date ? '已挂表' : '未挂表');
+              
+            case 'power_purchase_contract':
+              // 购售电合同状态
+              return values.includes(customer.power_purchase_contract ? '已出合同' : '待出');
+              
+            case 'status':
+              // 客户状态
+              const status = customer.status || '待处理';
+              return values.includes(status);
+              
+            case 'station_management':
+              // 补充资料（数组格式）
+              const stationValue = Array.isArray(customer.station_management) 
+                ? customer.station_management.join(',') 
+                : (customer.station_management || '');
+              return values.includes(stationValue);
+              
+            case 'drawing_change':
+              // 图纸变更
+              return values.includes(typeof customer.drawing_change === 'string' ? customer.drawing_change : '未出图');
+              
+            case 'urge_order':
+              // 催单日期
+              return values.includes(customer.urge_order ? dayjs(customer.urge_order).format('MM-DD HH:mm') : '');
+              
+            default:
+              // 默认处理
+              const fieldValue = String(customer[field as keyof Customer] || '');
+              return values.includes(fieldValue);
+          }
+        });
+      }
+    });
+    
+    // 应用文本搜索条件
+    if (searchText && searchText.trim()) {
+      const fieldsToSearch = Object.entries(searchFields)
+        .filter(([_, included]) => included)
+        .map(([field]) => field);
+        
+      // 支持空格或逗号分隔的多关键词搜索
+      const keywords = searchText.toLowerCase()
+        .split(/[\s,，]+/) // 按空格或中英文逗号分隔
+        .filter(keyword => keyword.trim() !== ''); // 过滤掉空字符串
+      
+      result = result.filter(customer => {
+        return fieldsToSearch.some(field => {
+          const value = customer[field as keyof Customer];
+          if (value === null || value === undefined) return false;
+          
+          const strValue = String(value).toLowerCase();
+          // 只要有一个关键词匹配就返回true
+          return keywords.some(keyword => strValue.includes(keyword));
+        });
+      });
+    }
+    
+    setFilteredCustomers(result);
+    populatePageCache(result, pageSize);
+    setTotalPages(Math.ceil(result.length / pageSize));
+    
+    console.log(`筛选结果: 找到 ${result.length} 条匹配记录`);
+    
+    // 在第一次筛选后，将页码重置为1
+    if (currentPage !== 1) {
+      setCurrentPage(1);
+    }
+  };
 
   return (
     <div className="customer-list-container" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>

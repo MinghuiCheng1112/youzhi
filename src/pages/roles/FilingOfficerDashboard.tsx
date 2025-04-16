@@ -152,21 +152,9 @@ const FilingOfficerDashboard = () => {
 
   // 根据搜索关键词筛选客户
   useEffect(() => {
-    if (searchText.trim()) {
-      const filtered = applySearchFilter(customers, searchText)
-      setFilteredCustomers(filtered)
-      
-      // 当搜索结果小于等于5人时，生成文本
-      if (filtered.length > 0 && filtered.length <= 5) {
-        generateSearchResultText(filtered, searchText);
-      } else {
-        setGeneratedText('');
-      }
-    } else {
-      setFilteredCustomers(customers)
-      setGeneratedText('');
-    }
-  }, [customers, searchText])
+    // 初始化显示全部数据
+    setFilteredCustomers(customers);
+  }, [customers])
 
   const fetchCustomers = async () => {
     try {
@@ -213,36 +201,10 @@ const FilingOfficerDashboard = () => {
     
     return data.filter(customer => {
       const customerName = (customer.customer_name || '').toLowerCase();
-      const phone = (customer.phone || '').toLowerCase();
-      const address = (customer.address || '').toLowerCase();
-      const idCard = (customer.id_card || '').toLowerCase();
-      const salesman = (customer.salesman || '').toLowerCase();
-      const constructionTeam = (customer.construction_team || '').toLowerCase();
       
-      // 改为包含匹配而不是精确匹配
-      return keywords.some(keyword => 
-        customerName.includes(keyword) || 
-        phone.includes(keyword) || 
-        address.includes(keyword) || 
-        idCard.includes(keyword) || 
-        salesman.includes(keyword) || 
-        constructionTeam.includes(keyword)
-      );
+      // 只匹配客户姓名
+      return keywords.some(keyword => customerName.includes(keyword));
     });
-  }
-
-  // 搜索功能 - 使用防抖优化性能
-  const debouncedSearch = useCallback(
-    debounce((value: string) => {
-      setSearchText(value)
-    }, 300),
-    [customers]
-  )
-
-  // 搜索处理函数
-  const handleSearch = (value: string) => {
-    setSearchText(value)
-    debouncedSearch(value)
   }
 
   // 导出客户数据
@@ -537,12 +499,30 @@ const FilingOfficerDashboard = () => {
         <Space size="middle">
           <Title level={2} style={{ margin: 0 }}>备案工作台</Title>
           <Input
-            placeholder="搜索客户姓名、电话、地址等"
+            placeholder="搜索客户姓名"
             prefix={<SearchOutlined />}
             style={{ width: 300 }}
-            value={searchText}
-            onChange={e => handleSearch(e.target.value)}
             allowClear
+            onChange={e => {
+              const value = e.target.value;
+              // 搜索处理
+              if (value.trim() === '') {
+                setFilteredCustomers(customers);
+                setSearchText('');
+                setGeneratedText('');
+              } else {
+                const filtered = applySearchFilter(customers, value);
+                setFilteredCustomers(filtered);
+                setSearchText(value);
+                
+                // 当搜索结果小于等于5人时，生成文本
+                if (filtered.length > 0 && filtered.length <= 5) {
+                  generateSearchResultText(filtered, value);
+                } else {
+                  setGeneratedText('');
+                }
+              }
+            }}
           />
         </Space>
         
