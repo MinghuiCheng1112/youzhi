@@ -217,80 +217,6 @@ const CustomerList = () => {
 
   // 添加activeFilters状态来跟踪当前激活的筛选条件
   const [activeFilters, setActiveFilters] = useState<{[key: string]: string[]}>({});
-  
-  // 通用排序处理函数
-  const handleSort = (field: string, direction: 'ascend' | 'descend' | null) => {
-    if (!direction) {
-      // 重置排序，但保留其他筛选条件
-      applyAllFilters();
-      return;
-    }
-    
-    setFilteredCustomers([...filteredCustomers].sort((a, b) => {
-      // 特殊字段处理
-      switch (field) {
-        case 'register_date':
-        case 'filing_date':
-        case 'urge_order':
-          // 日期类型字段的排序
-          if (!a[field as keyof Customer]) return 1;
-          if (!b[field as keyof Customer]) return -1;
-          
-          const aDate = new Date(a[field as keyof Customer] as string).getTime();
-          const bDate = new Date(b[field as keyof Customer] as string).getTime();
-          
-          return direction === 'ascend' ? aDate - bDate : bDate - aDate;
-
-        case 'module_count':
-        case 'capacity':
-          // 数值类型字段的排序
-          const aValue = Number(a[field as keyof Customer]) || 0;
-          const bValue = Number(b[field as keyof Customer]) || 0;
-          
-          return direction === 'ascend' ? aValue - bValue : bValue - aValue;
-          
-        case 'square_steel_status':
-          // 方钢出库状态排序
-          const aStatus = getSquareSteelStatus(a);
-          const bStatus = getSquareSteelStatus(b);
-          
-          return direction === 'ascend' 
-            ? aStatus.localeCompare(bStatus) 
-            : bStatus.localeCompare(aStatus);
-            
-        case 'component_status':
-          // 组件出库状态排序
-          const aComp = getComponentStatus(a);
-          const bComp = getComponentStatus(b);
-          
-          return direction === 'ascend' 
-            ? aComp.localeCompare(bComp) 
-            : bComp.localeCompare(aComp);
-            
-        case 'station_management':
-          // 补充资料排序（数组类型）
-          const aStation = Array.isArray(a.station_management) 
-            ? a.station_management.join(',') 
-            : (a.station_management || '');
-          const bStation = Array.isArray(b.station_management) 
-            ? b.station_management.join(',') 
-            : (b.station_management || '');
-            
-          return direction === 'ascend' 
-            ? aStation.localeCompare(bStation) 
-            : bStation.localeCompare(aStation);
-            
-        default:
-          // 字符串类型字段的排序
-          const aStr = String(a[field as keyof Customer] || '');
-          const bStr = String(b[field as keyof Customer] || '');
-          
-          return direction === 'ascend' 
-            ? aStr.localeCompare(bStr) 
-            : bStr.localeCompare(aStr);
-      }
-    }));
-  };
 
   useEffect(() => {
     fetchCustomers()
@@ -2105,66 +2031,16 @@ const CustomerList = () => {
   // 表格列定义
   const columns: ColumnsType<Customer> = [
     {
-      title: (
-        <TableHeaderFilter
-          title="登记日期"
-          dataIndex="register_date"
-          values={Array.from(new Set(customers.map(item => {
-            if (!item.register_date) return '';
-            return dayjs(item.register_date).format('YYYY-MM-DD');
-          }))).sort()}
-          allValues={customers.map(item => {
-            if (!item.register_date) return '';
-            return dayjs(item.register_date).format('YYYY-MM-DD');
-          })}
-          totalRows={customers.length}
-          onSort={(direction) => {
-            if (direction === 'ascend') {
-              setFilteredCustomers([...filteredCustomers].sort((a, b) => {
-                if (!a.register_date) return 1;
-                if (!b.register_date) return -1;
-                return new Date(a.register_date).getTime() - new Date(b.register_date).getTime();
-              }));
-            } else if (direction === 'descend') {
-              setFilteredCustomers([...filteredCustomers].sort((a, b) => {
-                if (!a.register_date) return 1;
-                if (!b.register_date) return -1;
-                return new Date(b.register_date).getTime() - new Date(a.register_date).getTime();
-              }));
-            } else {
-              // 重置排序，但保留其他筛选条件
-              applyAllFilters();
-            }
-          }}
-          onFilter={(selectedValues) => {
-            // 更新此字段的筛选条件
-            const newActiveFilters = { ...activeFilters };
-            
-            if (selectedValues.length === 0) {
-              // 如果没有选择值，删除此字段的筛选条件
-              delete newActiveFilters['register_date'];
-            } else {
-              // 否则更新此字段的筛选条件
-              newActiveFilters['register_date'] = selectedValues;
-            }
-            
-            // 更新激活的筛选条件并应用所有筛选
-            setActiveFilters(newActiveFilters);
-            applyAllFilters(newActiveFilters);
-          }}
-          onClear={() => {
-            // 清除此字段的筛选条件
-            const newActiveFilters = { ...activeFilters };
-            delete newActiveFilters['register_date'];
-            setActiveFilters(newActiveFilters);
-            applyAllFilters(newActiveFilters);
-          }}
-        />
-      ),
+      title: '登记日期',
       dataIndex: 'register_date',
       key: 'register_date',
       width: 120,
-      ellipsis: true,
+      sorter: (a, b) => {
+        if (!a.register_date && !b.register_date) return 0
+        if (!a.register_date) return -1
+        if (!b.register_date) return 1
+        return new Date(a.register_date).getTime() - new Date(b.register_date).getTime()
+      },
       render: (value, record) => (
         <EditableDateCell 
           value={value} 
@@ -2173,6 +2049,7 @@ const CustomerList = () => {
           title="登记日期" 
         />
       ),
+      ellipsis: true,
     },
     {
       title: (
@@ -2182,7 +2059,21 @@ const CustomerList = () => {
           values={Array.from(new Set(customers.map(item => item.customer_name || ''))).sort()}
           allValues={customers.map(item => item.customer_name || '')}
           totalRows={customers.length}
-          onSort={(direction) => handleSort('customer_name', direction)}
+          onSort={(direction) => {
+            // 在这里处理排序逻辑
+            if (direction === 'ascend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => 
+                (a.customer_name || '').localeCompare(b.customer_name || '')
+              ));
+            } else if (direction === 'descend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => 
+                (b.customer_name || '').localeCompare(a.customer_name || '')
+              ));
+            } else {
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
+            }
+          }}
           onFilter={(selectedValues) => {
             // 更新此字段的筛选条件
             const newActiveFilters = { ...activeFilters };
@@ -2232,7 +2123,21 @@ const CustomerList = () => {
           values={Array.from(new Set(customers.map(item => item.address || ''))).sort()}
           allValues={customers.map(item => item.address || '')}
           totalRows={customers.length}
-          onSort={(direction) => handleSort('address', direction)}
+          onSort={(direction) => {
+            // 在这里处理排序逻辑
+            if (direction === 'ascend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => 
+                (a.address || '').localeCompare(b.address || '')
+              ));
+            } else if (direction === 'descend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => 
+                (b.address || '').localeCompare(a.address || '')
+              ));
+            } else {
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
+            }
+          }}
           onFilter={(selectedValues) => {
             // 更新此字段的筛选条件
             const newActiveFilters = { ...activeFilters };
@@ -2281,7 +2186,21 @@ const CustomerList = () => {
           values={Array.from(new Set(customers.map(item => item.salesman || ''))).sort()}
           allValues={customers.map(item => item.salesman || '')}
           totalRows={customers.length}
-          onSort={(direction) => handleSort('salesman', direction)}
+          onSort={(direction) => {
+            // 在这里处理排序逻辑
+            if (direction === 'ascend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => 
+                (a.salesman || '').localeCompare(b.salesman || '')
+              ));
+            } else if (direction === 'descend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => 
+                (b.salesman || '').localeCompare(a.salesman || '')
+              ));
+            } else {
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
+            }
+          }}
           onFilter={(selectedValues) => {
             // 更新此字段的筛选条件
             const newActiveFilters = { ...activeFilters };
@@ -2367,7 +2286,21 @@ const CustomerList = () => {
           values={Array.from(new Set(customers.map(item => item.designer || ''))).sort()}
           allValues={customers.map(item => item.designer || '')}
           totalRows={customers.length}
-          onSort={(direction) => handleSort('designer', direction)}
+          onSort={(direction) => {
+            // 在这里处理排序逻辑
+            if (direction === 'ascend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => 
+                (a.designer || '').localeCompare(b.designer || '')
+              ));
+            } else if (direction === 'descend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => 
+                (b.designer || '').localeCompare(a.designer || '')
+              ));
+            } else {
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
+            }
+          }}
           onFilter={(selectedValues) => {
             // 更新此字段的筛选条件
             const newActiveFilters = { ...activeFilters };
@@ -2415,7 +2348,21 @@ const CustomerList = () => {
           values={Array.from(new Set(customers.map(item => item.surveyor || ''))).sort()}
           allValues={customers.map(item => item.surveyor || '')}
           totalRows={customers.length}
-          onSort={(direction) => handleSort('surveyor', direction)}
+          onSort={(direction) => {
+            // 在这里处理排序逻辑
+            if (direction === 'ascend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => 
+                (a.surveyor || '').localeCompare(b.surveyor || '')
+              ));
+            } else if (direction === 'descend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => 
+                (b.surveyor || '').localeCompare(a.surveyor || '')
+              ));
+            } else {
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
+            }
+          }}
           onFilter={(selectedValues) => {
             // 更新此字段的筛选条件
             const newActiveFilters = { ...activeFilters };
@@ -2473,7 +2420,25 @@ const CustomerList = () => {
             return item.station_management || '';
           })}
           totalRows={customers.length}
-          onSort={(direction) => handleSort('station_management', direction)}
+          onSort={(direction) => {
+            // 在这里处理排序逻辑
+            if (direction === 'ascend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => {
+                const aValue = Array.isArray(a.station_management) ? a.station_management.join(',') : (a.station_management || '');
+                const bValue = Array.isArray(b.station_management) ? b.station_management.join(',') : (b.station_management || '');
+                return aValue.localeCompare(bValue);
+              }));
+            } else if (direction === 'descend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => {
+                const aValue = Array.isArray(a.station_management) ? a.station_management.join(',') : (a.station_management || '');
+                const bValue = Array.isArray(b.station_management) ? b.station_management.join(',') : (b.station_management || '');
+                return bValue.localeCompare(aValue);
+              }));
+            } else {
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
+            }
+          }}
           onFilter={(selectedValues) => {
             // 更新此字段的筛选条件
             const newActiveFilters = { ...activeFilters };
@@ -2514,62 +2479,10 @@ const CustomerList = () => {
       ellipsis: true,
     },
     {
-      title: (
-        <TableHeaderFilter
-          title="备案日期"
-          dataIndex="filing_date"
-          values={Array.from(new Set(customers.map(item => {
-            // 处理可能是日期或文本的情况
-            if (!item.filing_date) return '';
-            // 尝试解析为日期
-            const date = dayjs(item.filing_date);
-            if (date.isValid() && String(item.filing_date).includes('-')) {
-              return date.format('YYYY-MM-DD');
-            }
-            // 如果不是有效日期，则当作文本处理
-            return String(item.filing_date);
-          }))).sort()}
-          allValues={customers.map(item => {
-            if (!item.filing_date) return '';
-            // 尝试解析为日期
-            const date = dayjs(item.filing_date);
-            if (date.isValid() && String(item.filing_date).includes('-')) {
-              return date.format('YYYY-MM-DD');
-            }
-            // 如果不是有效日期，则当作文本处理
-            return String(item.filing_date);
-          })}
-          totalRows={customers.length}
-          onSort={(direction) => handleSort('filing_date', direction)}
-          onFilter={(selectedValues) => {
-            // 更新此字段的筛选条件
-            const newActiveFilters = { ...activeFilters };
-            
-            if (selectedValues.length === 0) {
-              // 如果没有选择值，删除此字段的筛选条件
-              delete newActiveFilters['filing_date'];
-            } else {
-              // 否则更新此字段的筛选条件
-              newActiveFilters['filing_date'] = selectedValues;
-            }
-            
-            // 更新激活的筛选条件并应用所有筛选
-            setActiveFilters(newActiveFilters);
-            applyAllFilters(newActiveFilters);
-          }}
-          onClear={() => {
-            // 清除此字段的筛选条件
-            const newActiveFilters = { ...activeFilters };
-            delete newActiveFilters['filing_date'];
-            setActiveFilters(newActiveFilters);
-            applyAllFilters(newActiveFilters);
-          }}
-        />
-      ),
+      title: '备案日期',
       dataIndex: 'filing_date',
       key: 'filing_date',
       width: 130,
-      ellipsis: true,
       render: (value, record) => (
         <EditableCell 
           value={value} 
@@ -2579,6 +2492,7 @@ const CustomerList = () => {
           required={false}
         />
       ),
+      ellipsis: true,
     },
     {
       title: '电表号码',
@@ -2596,7 +2510,23 @@ const CustomerList = () => {
           values={Array.from(new Set(customers.map(item => typeof item.drawing_change === 'string' ? item.drawing_change : '未出图'))).sort()}
           allValues={customers.map(item => typeof item.drawing_change === 'string' ? item.drawing_change : '未出图')}
           totalRows={customers.length}
-          onSort={(direction) => handleSort('drawing_change', direction)}
+          onSort={(direction) => {
+            // 在这里处理排序逻辑
+            if (direction === 'ascend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => 
+                (typeof a.drawing_change === 'string' ? a.drawing_change : '未出图')
+                  .localeCompare(typeof b.drawing_change === 'string' ? b.drawing_change : '未出图')
+              ));
+            } else if (direction === 'descend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => 
+                (typeof b.drawing_change === 'string' ? b.drawing_change : '未出图')
+                  .localeCompare(typeof a.drawing_change === 'string' ? a.drawing_change : '未出图')
+              ));
+            } else {
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
+            }
+          }}
           onFilter={(selectedValues) => {
             // 更新此字段的筛选条件
             const newActiveFilters = { ...activeFilters };
@@ -2689,7 +2619,26 @@ const CustomerList = () => {
           values={Array.from(new Set(customers.map(item => item.urge_order ? dayjs(item.urge_order).format('MM-DD HH:mm') : ''))).sort()}
           allValues={customers.map(item => item.urge_order ? dayjs(item.urge_order).format('MM-DD HH:mm') : '')}
           totalRows={customers.length}
-          onSort={(direction) => handleSort('urge_order', direction)}
+          onSort={(direction) => {
+            if (direction === 'ascend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => {
+        if (!a.urge_order && !b.urge_order) return 0;
+                if (!a.urge_order) return -1;
+                if (!b.urge_order) return 1;
+                return new Date(a.urge_order).getTime() - new Date(b.urge_order).getTime();
+              }));
+            } else if (direction === 'descend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => {
+                if (!a.urge_order && !b.urge_order) return 0;
+        if (!a.urge_order) return 1;
+        if (!b.urge_order) return -1;
+        return new Date(b.urge_order).getTime() - new Date(a.urge_order).getTime();
+              }));
+            } else {
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
+            }
+          }}
           onFilter={(selectedValues) => {
             // 更新此字段的筛选条件
             const newActiveFilters = { ...activeFilters };
@@ -2762,7 +2711,17 @@ const CustomerList = () => {
           })}
           allValues={customers.map(item => item.module_count ? item.module_count.toString() : '')}
           totalRows={customers.length}
-          onSort={(direction) => handleSort('module_count', direction)}
+          onSort={(direction) => {
+            // 数值排序逻辑
+            if (direction === 'ascend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => (a.module_count || 0) - (b.module_count || 0)));
+            } else if (direction === 'descend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => (b.module_count || 0) - (a.module_count || 0)));
+            } else {
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
+            }
+          }}
           onFilter={(selectedValues) => {
             // 更新此字段的筛选条件
             const newActiveFilters = { ...activeFilters };
@@ -2807,7 +2766,17 @@ const CustomerList = () => {
           })}
           allValues={customers.map(item => item.capacity ? item.capacity.toString() : '')}
           totalRows={customers.length}
-          onSort={(direction) => handleSort('capacity', direction)}
+          onSort={(direction) => {
+            // 数值排序逻辑
+            if (direction === 'ascend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => (a.capacity || 0) - (b.capacity || 0)));
+            } else if (direction === 'descend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => (b.capacity || 0) - (a.capacity || 0)));
+            } else {
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
+            }
+          }}
           onFilter={(selectedValues) => {
             // 更新此字段的筛选条件
             const newActiveFilters = { ...activeFilters };
@@ -2862,7 +2831,21 @@ const CustomerList = () => {
           values={Array.from(new Set(customers.map(item => item.inverter || ''))).sort()}
           allValues={customers.map(item => item.inverter || '')}
           totalRows={customers.length}
-          onSort={(direction) => handleSort('inverter', direction)}
+          onSort={(direction) => {
+            // 在这里处理排序逻辑
+            if (direction === 'ascend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => 
+                (a.inverter || '').localeCompare(b.inverter || '')
+              ));
+            } else if (direction === 'descend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => 
+                (b.inverter || '').localeCompare(a.inverter || '')
+              ));
+            } else {
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
+            }
+          }}
           onFilter={(selectedValues) => {
             // 更新此字段的筛选条件
             const newActiveFilters = { ...activeFilters };
@@ -2923,7 +2906,21 @@ const CustomerList = () => {
           values={Array.from(new Set(customers.map(item => item.copper_wire || ''))).sort()}
           allValues={customers.map(item => item.copper_wire || '')}
           totalRows={customers.length}
-          onSort={(direction) => handleSort('copper_wire', direction)}
+          onSort={(direction) => {
+            // 在这里处理排序逻辑
+            if (direction === 'ascend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => 
+                (a.copper_wire || '').localeCompare(b.copper_wire || '')
+              ));
+            } else if (direction === 'descend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => 
+                (b.copper_wire || '').localeCompare(a.copper_wire || '')
+              ));
+            } else {
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
+            }
+          }}
           onFilter={(selectedValues) => {
             // 更新此字段的筛选条件
             const newActiveFilters = { ...activeFilters };
@@ -2983,7 +2980,21 @@ const CustomerList = () => {
           values={Array.from(new Set(customers.map(item => item.aluminum_wire || ''))).sort()}
           allValues={customers.map(item => item.aluminum_wire || '')}
           totalRows={customers.length}
-          onSort={(direction) => handleSort('aluminum_wire', direction)}
+          onSort={(direction) => {
+            // 在这里处理排序逻辑
+            if (direction === 'ascend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => 
+                (a.aluminum_wire || '').localeCompare(b.aluminum_wire || '')
+              ));
+            } else if (direction === 'descend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => 
+                (b.aluminum_wire || '').localeCompare(a.aluminum_wire || '')
+              ));
+            } else {
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
+            }
+          }}
           onFilter={(selectedValues) => {
             // 更新此字段的筛选条件
             const newActiveFilters = { ...activeFilters };
@@ -3043,7 +3054,21 @@ const CustomerList = () => {
           values={Array.from(new Set(customers.map(item => item.distribution_box || ''))).sort()}
           allValues={customers.map(item => item.distribution_box || '')}
           totalRows={customers.length}
-          onSort={(direction) => handleSort('distribution_box', direction)}
+          onSort={(direction) => {
+            // 在这里处理排序逻辑
+            if (direction === 'ascend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => 
+                (a.distribution_box || '').localeCompare(b.distribution_box || '')
+              ));
+            } else if (direction === 'descend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => 
+                (b.distribution_box || '').localeCompare(a.distribution_box || '')
+              ));
+            } else {
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
+            }
+          }}
           onFilter={(selectedValues) => {
             // 更新此字段的筛选条件
             const newActiveFilters = { ...activeFilters };
@@ -3119,7 +3144,25 @@ const CustomerList = () => {
             }
           })}
           totalRows={customers.length}
-          onSort={(direction) => handleSort('square_steel_status', direction)}
+          onSort={(direction) => {
+            // 在这里处理排序逻辑
+            if (direction === 'ascend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => {
+                const aStatus = getSquareSteelStatus(a);
+                const bStatus = getSquareSteelStatus(b);
+                return aStatus.localeCompare(bStatus);
+              }));
+            } else if (direction === 'descend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => {
+                const aStatus = getSquareSteelStatus(a);
+                const bStatus = getSquareSteelStatus(b);
+                return bStatus.localeCompare(aStatus);
+              }));
+            } else {
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
+            }
+          }}
           onFilter={(selectedValues) => {
             // 更新此字段的筛选条件
             const newActiveFilters = { ...activeFilters };
@@ -3203,7 +3246,25 @@ const CustomerList = () => {
           values={Array.from(new Set(customers.map(item => getComponentStatus(item)))).sort()}
           allValues={customers.map(item => getComponentStatus(item))}
           totalRows={customers.length}
-          onSort={(direction) => handleSort('component_status', direction)}
+          onSort={(direction) => {
+            // 在这里处理排序逻辑
+            if (direction === 'ascend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => {
+                const aStatus = getComponentStatus(a);
+                const bStatus = getComponentStatus(b);
+                return aStatus.localeCompare(bStatus);
+              }));
+            } else if (direction === 'descend') {
+              setFilteredCustomers([...filteredCustomers].sort((a, b) => {
+                const aStatus = getComponentStatus(a);
+                const bStatus = getComponentStatus(b);
+                return bStatus.localeCompare(aStatus);
+              }));
+            } else {
+              // 重置排序，但保留其他筛选条件
+              applyAllFilters();
+            }
+          }}
           onFilter={(selectedValues) => {
             // 更新此字段的筛选条件
             const newActiveFilters = { ...activeFilters };
@@ -4975,18 +5036,29 @@ const CustomerList = () => {
       <Space>
         <Input
           style={{ width: 200 }}
-          placeholder="搜索客户姓名"
+          placeholder="搜索客户姓名 (多关键词用空格或逗号分隔)"
           allowClear
           prefix={<SearchOutlined />}
           onChange={(e) => {
             const value = e.target.value;
-            // 只搜索客户姓名字段
+            // 搜索客户姓名字段，支持空格或逗号分隔的多关键词
             if (value.trim() === '') {
               setFilteredCustomers(customers);
             } else {
-              const filtered = customers.filter(customer => 
-                customer.customer_name && customer.customer_name.toLowerCase().includes(value.toLowerCase())
-              );
+              // 支持空格或逗号分隔的多关键词搜索
+              const keywords = value.toLowerCase()
+                .split(/[\s,，]+/) // 按空格或中英文逗号分隔
+                .filter(keyword => keyword.trim() !== ''); // 过滤掉空字符串
+              
+              // 只要包含任一关键词即匹配成功
+              const filtered = customers.filter(customer => {
+                if (!customer.customer_name) return false;
+                const name = customer.customer_name.toLowerCase();
+                
+                // 对每个关键词进行检查，只要有一个关键词匹配就返回true
+                return keywords.some(keyword => name.includes(keyword));
+              });
+              
               setFilteredCustomers(filtered);
             }
           }}
@@ -6059,6 +6131,7 @@ const CustomerList = () => {
           <div style={{ marginTop: 16 }}>
             <p>当前搜索内容：{searchText || '(无)'}</p>
             <p>当前将在{selectedCount}个字段中进行搜索</p>
+            <p style={{ color: '#1890ff' }}>支持多关键词搜索：使用空格或逗号分隔多个关键词，系统将返回包含任一关键词的结果</p>
           </div>
         </div>
       </Modal>
@@ -6155,25 +6228,6 @@ const CustomerList = () => {
               // 催单日期
               return values.includes(customer.urge_order ? dayjs(customer.urge_order).format('MM-DD HH:mm') : '');
               
-            case 'register_date':
-              // 登记日期 - 需要格式化为YYYY-MM-DD进行比较
-              const formattedDate = customer.register_date 
-                ? dayjs(customer.register_date).format('YYYY-MM-DD')
-                : '';
-              return values.includes(formattedDate);
-              
-            case 'filing_date':
-              // 备案日期 - 需要处理可能是日期或文本的情况
-              if (!customer.filing_date) return values.includes('');
-              
-              // 尝试解析为日期
-              const filingDate = dayjs(customer.filing_date);
-              if (filingDate.isValid() && String(customer.filing_date).includes('-')) {
-                return values.includes(filingDate.format('YYYY-MM-DD'));
-              }
-              // 如果不是有效日期，则当作文本处理
-              return values.includes(String(customer.filing_date));
-              
             default:
               // 默认处理
               const fieldValue = String(customer[field as keyof Customer] || '');
@@ -6185,17 +6239,23 @@ const CustomerList = () => {
     
     // 应用文本搜索条件
     if (searchText && searchText.trim()) {
-      const searchLower = searchText.toLowerCase();
       const fieldsToSearch = Object.entries(searchFields)
         .filter(([_, included]) => included)
         .map(([field]) => field);
+        
+      // 支持空格或逗号分隔的多关键词搜索
+      const keywords = searchText.toLowerCase()
+        .split(/[\s,，]+/) // 按空格或中英文逗号分隔
+        .filter(keyword => keyword.trim() !== ''); // 过滤掉空字符串
       
       result = result.filter(customer => {
         return fieldsToSearch.some(field => {
           const value = customer[field as keyof Customer];
           if (value === null || value === undefined) return false;
           
-          return String(value).toLowerCase().includes(searchLower);
+          const strValue = String(value).toLowerCase();
+          // 只要有一个关键词匹配就返回true
+          return keywords.some(keyword => strValue.includes(keyword));
         });
       });
     }
