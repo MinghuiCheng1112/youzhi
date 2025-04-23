@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Card, Typography, Table, Button, Input, Space, message, Spin, Empty, Statistic, Row, Col, Progress, Tag, InputNumber, Form, Tabs, Divider } from 'antd'
+import { Card, Typography, Table, Button, Input, Space, message, Spin, Empty, Statistic, Row, Col, Progress, Tag, InputNumber, Form, Tabs, Divider, Modal } from 'antd'
 import { 
   ReloadOutlined, 
   SearchOutlined, 
@@ -13,7 +13,8 @@ import {
   DollarOutlined,
   ToolOutlined,
   DownloadOutlined,
-  SyncOutlined
+  SyncOutlined,
+  PlusOutlined
 } from '@ant-design/icons'
 import { customerApi } from '../../services/api'
 import { procurementApi, ProcurementMaterial } from '../../services/procurementApi'
@@ -93,8 +94,13 @@ const ProcurementDashboard = () => {
   const [totalAmount, setTotalAmount] = useState<number>(0)
   const [tonnage, setTonnage] = useState<number>(0)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [editingField, setEditingField] = useState<'perHousehold' | 'price' | 'warehouseInventory' | null>(null)
+  const [editingField, setEditingField] = useState<'perHousehold' | 'price' | 'warehouseInventory' | 'name' | 'specs' | null>(null)
   const [form] = Form.useForm()
+  
+  // 新增材料相关状态
+  const [newMaterialModalVisible, setNewMaterialModalVisible] = useState(false)
+  const [newMaterialForm] = Form.useForm()
+  const [addingMaterial, setAddingMaterial] = useState(false)
   
   // 更新队列和锁
   const pendingUpdatesRef = useRef<Record<string, Partial<Material>>>({})
@@ -246,123 +252,157 @@ const ProcurementDashboard = () => {
     setTonnage(tons)
   }
 
-  // 异步更新数据到服务器
+  // 将更新同步到服务器
   const syncToServer = async () => {
-    if (updateInProgressRef.current) return
+    // 如果正在更新或没有待更新项，则返回
+    if (updateInProgressRef.current || Object.keys(pendingUpdatesRef.current).length === 0) {
+      return
+    }
     
-    // 检查是否有待更新的数据
-    const pendingUpdates = pendingUpdatesRef.current
-    const updateKeys = Object.keys(pendingUpdates)
-    
-    if (updateKeys.length === 0) return
-    
+    // 设置更新锁
     updateInProgressRef.current = true
     setSavingData(true)
     
     try {
-      // 准备更新数据
-      const updates = updateKeys.map(id => ({
-        id,
-        updates: {
-          per_household: pendingUpdates[id].perHousehold,
-          price: pendingUpdates[id].price,
-          warehouse_inventory: pendingUpdates[id].warehouseInventory
-        }
-      }))
+      console.log('向服务器同步更新')
       
-      console.log('准备更新数据到服务器:', updates) // 添加日志
+      const updates = []
       
-      // 清空更新队列
-      pendingUpdatesRef.current = {}
-      
-      // 使用逐个更新方法
-      const success = await procurementApi.updateMaterialsOneByOne(updates)
-      
-      if (success) {
-        console.log('数据已成功同步到服务器')
-        message.success('数据已成功同步到服务器')
-        // 更新本地材料的isDirty状态
-        setMaterials(prev => prev.map(item => 
-          updateKeys.includes(item.id) ? {...item, isDirty: false} : item
-        ))
-      } else {
-        message.error('同步数据失败，将在稍后重试')
-        // 失败时将更新重新添加到队列
-        updateKeys.forEach(id => {
-          pendingUpdatesRef.current[id] = pendingUpdates[id]
-        })
+      // 遍历所有更新
+      for (const id in pendingUpdatesRef.current) {
+        const updateData = pendingUpdatesRef.current[id]
         
-        // 设置一个定时器稍后重试
-        syncTimeoutRef.current = setTimeout(syncToServer, 5000)
+        // 创建更新请求
+        const updateRequest: any = {
+          id: id,
+          updates: {}
+        }
+        
+        // 转换字段名
+        if ('perHousehold' in updateData) {
+          updateRequest.updates.per_household = updateData.perHousehold
+        }
+        
+        if ('price' in updateData) {
+          updateRequest.updates.price = updateData.price
+        }
+        
+        if ('warehouseInventory' in updateData) {
+          updateRequest.updates.warehouse_inventory = updateData.warehouseInventory
+        }
+        
+        if ('name' in updateData) {
+          updateRequest.updates.name = updateData.name
+        }
+        
+        if ('specs' in updateData) {
+          updateRequest.updates.specs = updateData.specs
+        }
+        
+        updates.push(updateRequest)
+      }
+      
+      if (updates.length > 0) {
+        // 逐一更新材料
+        const success = await procurementApi.updateMaterialsOneByOne(updates)
+        
+        if (success) {
+          console.log('更新成功')
+          pendingUpdatesRef.current = {} // 清空待更新队列
+          message.success('更新成功')
+          
+          // 标记材料不再为脏数据
+          const updatedMaterials = materials.map(material => ({
+            ...material,
+            isDirty: false
+          }))
+          setMaterials(updatedMaterials)
+        } else {
+          console.error('部分材料更新失败')
+          message.error('部分材料更新失败，请重试')
+        }
       }
     } catch (error) {
-      console.error('同步数据发生错误:', error)
-      message.error('同步数据时发生错误，将在稍后重试')
-      
-      // 失败时将所有更新重新添加到队列
-      Object.keys(pendingUpdates).forEach(id => {
-        pendingUpdatesRef.current[id] = pendingUpdates[id]
-      })
-      
-      // 设置一个定时器稍后重试
-      syncTimeoutRef.current = setTimeout(syncToServer, 5000)
+      console.error('同步到服务器失败:', error)
+      message.error('同步失败，请重试')
     } finally {
+      // 释放更新锁
       updateInProgressRef.current = false
       setSavingData(false)
     }
   }
-  
+
   // 使用防抖来减少频繁更新，改为1秒
   const debouncedSyncToServer = useCallback(debounce(syncToServer, 1000), [])
 
-  // 更新材料数据并加入到更新队列
-  const updateMaterialUsage = (id: string, field: 'perHousehold' | 'price' | 'warehouseInventory', value: number) => {
-    console.log(`更新材料 ${id} 的 ${field} 为 ${value}`) // 添加日志
+  // 更新材料使用信息
+  const updateMaterialUsage = (id: string, field: 'perHousehold' | 'price' | 'warehouseInventory' | 'name' | 'specs', value: any) => {
+    // 复制当前材料列表以进行更新
+    const updatedMaterials = [...materials]
+    const materialIndex = updatedMaterials.findIndex(item => item.id === id)
     
-    // 更新本地状态
-    const updatedMaterials = materials.map(material => 
-      material.id === id ? { ...material, [field]: value, isDirty: true } : material
-    )
-    setMaterials(updatedMaterials)
-    
-    // 将更新添加到队列
-    if (!pendingUpdatesRef.current[id]) {
-      pendingUpdatesRef.current[id] = {}
+    if (materialIndex > -1) {
+      // 创建材料副本
+      const updatedMaterial = { ...updatedMaterials[materialIndex] }
+      
+      // 根据字段类型更新值
+      if (field === 'name' || field === 'specs') {
+        updatedMaterial[field] = value
+      } else {
+        updatedMaterial[field] = parseFloat(value)
+      }
+      
+      // 标记为已修改
+      updatedMaterial.isDirty = true
+      
+      // 更新材料列表
+      updatedMaterials[materialIndex] = updatedMaterial
+      setMaterials(updatedMaterials)
+      
+      // 将更新添加到队列
+      pendingUpdatesRef.current[id] = {
+        ...pendingUpdatesRef.current[id],
+        [field]: field === 'name' || field === 'specs' ? value : parseFloat(value)
+      }
+      
+      // 如果没有正在进行的同步，设置延迟同步
+      if (!updateInProgressRef.current && syncTimeoutRef.current === null) {
+        syncTimeoutRef.current = setTimeout(() => {
+          syncToServer()
+          syncTimeoutRef.current = null
+        }, 2000) // 2秒后自动同步
+      }
     }
-    
-    // 根据字段名映射到数据库字段
-    if (field === 'perHousehold') {
-      pendingUpdatesRef.current[id].perHousehold = value
-    } else if (field === 'price') {
-      pendingUpdatesRef.current[id].price = value
-    } else if (field === 'warehouseInventory') {
-      pendingUpdatesRef.current[id].warehouseInventory = value
-    }
-    
-    // 触发防抖同步
-    debouncedSyncToServer()
   }
 
   // 开始编辑
-  const startEditing = (id: string, field: 'perHousehold' | 'price' | 'warehouseInventory') => {
+  const startEditing = (id: string, field: 'perHousehold' | 'price' | 'warehouseInventory' | 'name' | 'specs') => {
     setEditingId(id)
     setEditingField(field)
-    const material = materials.find(m => m.id === id)
+    
+    // 获取当前值填充到表单
+    const material = materials.find(item => item.id === id)
     if (material) {
-      form.setFieldsValue({ [field]: material[field] })
+      form.setFieldsValue({
+        [field]: material[field]
+      })
     }
   }
 
   // 保存编辑
   const saveEdit = async (id: string) => {
     try {
-      if (!editingField) return
       const values = await form.validateFields()
-      updateMaterialUsage(id, editingField, values[editingField])
+      const value = values[editingField!]
+      
+      // 更新材料使用数据
+      updateMaterialUsage(id, editingField!, value)
+      
+      // 清除编辑状态
       setEditingId(null)
       setEditingField(null)
     } catch (error) {
-      console.error('验证失败:', error)
+      console.error('表单验证失败:', error)
     }
   }
 
@@ -386,6 +426,58 @@ const ProcurementDashboard = () => {
     return Object.keys(pendingUpdatesRef.current).length
   }
 
+  // 显示新增材料Modal
+  const showNewMaterialModal = () => {
+    newMaterialForm.resetFields()
+    setNewMaterialModalVisible(true)
+  }
+  
+  // 处理新增材料
+  const handleAddMaterial = async () => {
+    try {
+      const values = await newMaterialForm.validateFields()
+      setAddingMaterial(true)
+      
+      // 准备材料数据
+      const newMaterial = {
+        name: values.name,
+        specs: values.specs,
+        per_household: values.perHousehold,
+        price: values.price,
+        warehouse_inventory: values.warehouseInventory || 0,
+        updated_at: new Date().toISOString()
+      }
+      
+      // 调用API创建材料
+      const result = await procurementApi.createMaterial(newMaterial)
+      
+      if (result) {
+        // 添加到材料列表
+        const createdMaterial: Material = {
+          id: result.id,
+          name: result.name,
+          specs: result.specs,
+          perHousehold: result.per_household,
+          price: result.price,
+          warehouseInventory: result.warehouse_inventory,
+          isDirty: false
+        }
+        
+        setMaterials([...materials, createdMaterial])
+        
+        message.success('新材料添加成功')
+        setNewMaterialModalVisible(false)
+      } else {
+        message.error('添加材料失败')
+      }
+    } catch (error) {
+      console.error('添加材料失败:', error)
+      message.error('添加材料失败，请检查表单')
+    } finally {
+      setAddingMaterial(false)
+    }
+  }
+
   // 商品信息表格列定义
   const materialsColumns = [
     {
@@ -404,18 +496,78 @@ const ProcurementDashboard = () => {
       title: '货位名称',
       dataIndex: 'name',
       key: 'name',
-      render: (text: string) => <Text strong>{text}</Text>
+      render: (text: string, record: Material) => {
+        const isEditing = record.id === editingId && editingField === 'name';
+        return isEditing ? (
+          <Form form={form} component={false}>
+            <Form.Item
+              name="name"
+              style={{ margin: 0 }}
+              rules={[{ required: true, message: '请输入货位名称' }]}
+            >
+              <Input
+                style={{ width: '100%' }}
+                autoFocus
+                onPressEnter={() => saveEdit(record.id)}
+                onBlur={() => saveEdit(record.id)}
+              />
+            </Form.Item>
+          </Form>
+        ) : (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text strong>{text}</Text>
+            <Button 
+              type="link" 
+              icon={<EditOutlined />} 
+              onClick={() => startEditing(record.id, 'name')} 
+              size="small"
+              style={{ marginLeft: 8 }}
+            />
+          </div>
+        );
+      }
     },
     {
       title: '规格型号',
       dataIndex: 'specs',
       key: 'specs',
       width: 200,
-      render: (text: string) => (
-        <Text type="secondary" style={{ whiteSpace: 'pre-wrap' }}>
-          {text}
-        </Text>
-      )
+      render: (text: string, record: Material) => {
+        const isEditing = record.id === editingId && editingField === 'specs';
+        return isEditing ? (
+          <Form form={form} component={false}>
+            <Form.Item
+              name="specs"
+              style={{ margin: 0 }}
+              rules={[{ required: true, message: '请输入规格型号' }]}
+            >
+              <Input.TextArea
+                style={{ width: '100%' }}
+                autoFocus
+                autoSize={{ minRows: 2, maxRows: 6 }}
+                onPressEnter={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    saveEdit(record.id);
+                  }
+                }}
+                onBlur={() => saveEdit(record.id)}
+              />
+            </Form.Item>
+          </Form>
+        ) : (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text type="secondary" style={{ whiteSpace: 'pre-wrap' }}>{text}</Text>
+            <Button 
+              type="link" 
+              icon={<EditOutlined />} 
+              onClick={() => startEditing(record.id, 'specs')} 
+              size="small"
+              style={{ marginLeft: 8 }}
+            />
+          </div>
+        );
+      }
     },
     {
       title: '每户用料',
@@ -689,6 +841,39 @@ const ProcurementDashboard = () => {
     }
   };
 
+  // 材料表格操作区
+  const materialsActionsRender = () => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+      <Space>
+        <Button 
+          icon={<ReloadOutlined />} 
+          onClick={loadMaterials}
+          loading={loading}
+        >
+          刷新
+        </Button>
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          onClick={showNewMaterialModal}
+        >
+          新增材料
+        </Button>
+      </Space>
+      <Space>
+        <Button 
+          type="primary" 
+          icon={<SyncOutlined />} 
+          onClick={forceSyncToServer}
+          loading={savingData}
+          disabled={getPendingUpdatesCount() === 0}
+        >
+          保存修改 {getPendingUpdatesCount() > 0 && `(${getPendingUpdatesCount()})`}
+        </Button>
+      </Space>
+    </div>
+  )
+
   return (
     <div className="procurement-dashboard">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
@@ -731,35 +916,19 @@ const ProcurementDashboard = () => {
           tab={<span><ToolOutlined /> 采购材料表</span>} 
           key="1"
         >
-          <Card 
-            title={
-              <div style={{ display: 'flex', alignItems: 'center' }}>
-                <InboxOutlined style={{ marginRight: 8, color: '#1890ff' }} />
-                <span>采购材料表</span>
-              </div>
-            }
-            style={{ 
-              boxShadow: '0 1px 2px -2px rgba(0, 0, 0, 0.16), 0 3px 6px 0 rgba(0, 0, 0, 0.12), 0 5px 12px 4px rgba(0, 0, 0, 0.09)',
-              borderRadius: '8px',
-              marginBottom: 16
-            }}
-            extra={
-              <Text type="secondary">点击单价或用料后的编辑按钮可修改数值</Text>
-            }
-          >
-            <Table
-              columns={materialsColumns}
-              dataSource={materials}
-              rowKey="id"
-              pagination={false}
-              size="middle"
-              scroll={{ y: 500 }}
-              className="custom-table"
-              rowClassName={() => 'material-row'}
-              bordered
-              onChange={() => {}}
-            />
-          </Card>
+          {materialsActionsRender()}
+          <Table
+            columns={materialsColumns}
+            dataSource={materials}
+            rowKey="id"
+            pagination={false}
+            size="middle"
+            scroll={{ y: 500 }}
+            className="custom-table"
+            rowClassName={() => 'material-row'}
+            bordered
+            onChange={() => {}}
+          />
         </TabPane>
 
         <TabPane 
@@ -875,6 +1044,72 @@ const ProcurementDashboard = () => {
           </Card>
         </TabPane>
       </Tabs>
+
+      {/* 新增材料Modal */}
+      <Modal
+        title="新增材料"
+        open={newMaterialModalVisible}
+        onOk={handleAddMaterial}
+        onCancel={() => setNewMaterialModalVisible(false)}
+        confirmLoading={addingMaterial}
+        maskClosable={false}
+      >
+        <Form form={newMaterialForm} layout="vertical">
+          <Form.Item
+            name="name"
+            label="货位名称"
+            rules={[{ required: true, message: '请输入货位名称' }]}
+          >
+            <Input placeholder="请输入货位名称" />
+          </Form.Item>
+          <Form.Item
+            name="specs"
+            label="规格型号"
+            rules={[{ required: true, message: '请输入规格型号' }]}
+          >
+            <Input.TextArea 
+              placeholder="请输入规格型号" 
+              autoSize={{ minRows: 2, maxRows: 6 }}
+            />
+          </Form.Item>
+          <Form.Item
+            name="perHousehold"
+            label="每户用料"
+            rules={[{ required: true, message: '请输入每户用料数量' }]}
+          >
+            <InputNumber 
+              min={0} 
+              precision={0} 
+              style={{ width: '100%' }} 
+              placeholder="请输入每户用料数量"
+            />
+          </Form.Item>
+          <Form.Item
+            name="price"
+            label="单价"
+            rules={[{ required: true, message: '请输入单价' }]}
+          >
+            <InputNumber 
+              min={0} 
+              precision={2} 
+              style={{ width: '100%' }} 
+              placeholder="请输入单价"
+            />
+          </Form.Item>
+          <Form.Item
+            name="warehouseInventory"
+            label="仓库余料"
+            initialValue={0}
+          >
+            <InputNumber 
+              min={0} 
+              precision={0} 
+              style={{ width: '100%' }} 
+              placeholder="请输入仓库余料数量（可选）"
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <style>
         {`

@@ -103,13 +103,33 @@ class ProcurementApi {
       
       // 逐个更新每个材料
       for (const update of updates) {
-        const { data, error } = await supabase
+        // 构建更新对象，只包含传入的字段
+        const updateData: Partial<ProcurementMaterial> = {};
+        
+        // 检查并添加各个字段
+        if (update.updates.per_household !== undefined) {
+          updateData.per_household = update.updates.per_household;
+        }
+        
+        if (update.updates.price !== undefined) {
+          updateData.price = update.updates.price;
+        }
+        
+        if (update.updates.warehouse_inventory !== undefined) {
+          updateData.warehouse_inventory = update.updates.warehouse_inventory;
+        }
+        
+        if (update.updates.name !== undefined) {
+          updateData.name = update.updates.name;
+        }
+        
+        if (update.updates.specs !== undefined) {
+          updateData.specs = update.updates.specs;
+        }
+        
+        const { error } = await supabase
           .from('procurement_materials')
-          .update({
-            per_household: update.updates.per_household,
-            price: update.updates.price,
-            warehouse_inventory: update.updates.warehouse_inventory
-          })
+          .update(updateData)
           .eq('id', update.id)
         
         if (error) {
@@ -122,6 +142,29 @@ class ProcurementApi {
     } catch (error) {
       console.error('更新材料信息发生错误:', error)
       return false
+    }
+  }
+
+  // 创建新材料
+  async createMaterial(materialData: Omit<ProcurementMaterial, 'id' | 'created_at'>): Promise<ProcurementMaterial | null> {
+    try {
+      console.log('创建新材料:', materialData)
+      
+      const { data, error } = await supabase
+        .from('procurement_materials')
+        .insert([materialData])
+        .select()
+        .single()
+      
+      if (error) {
+        console.error('创建材料失败:', error)
+        throw error
+      }
+      
+      return data
+    } catch (error) {
+      console.error('创建材料发生错误:', error)
+      return null
     }
   }
 }
