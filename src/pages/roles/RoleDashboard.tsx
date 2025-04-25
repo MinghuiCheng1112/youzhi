@@ -805,6 +805,7 @@ const RoleDashboard = () => {
       title: '角色名称',
       dataIndex: 'role',
       key: 'roleName',
+      width: 120,
       render: (role: string, record: UserWithRole) => {
         const roleOption = ROLE_OPTIONS.find(option => option.value === role);
         // 给待分配角色用户添加高亮
@@ -831,14 +832,17 @@ const RoleDashboard = () => {
       title: '邮箱',
       dataIndex: 'email',
       key: 'email',
+      width: '25%',
+      ellipsis: false,
       render: (email: string) => (
-        <span style={{ wordBreak: 'break-all' }}>{email}</span>
+        <span style={{ wordBreak: 'break-all', whiteSpace: 'normal' }}>{email}</span>
       ),
     },
     {
       title: '员工名称',
       dataIndex: 'name',
       key: 'name',
+      width: 150,
       editable: true,
       render: (name: string, record: UserWithRole) => (
         <EmployeeNameCell name={name} record={record} />
@@ -848,6 +852,7 @@ const RoleDashboard = () => {
       title: '员工电话',
       dataIndex: 'phone',
       key: 'phone',
+      width: 150,
       editable: true,
       render: (phone: string, record: UserWithRole) => (
         <EmployeePhoneCell phone={phone} record={record} />
@@ -857,6 +862,7 @@ const RoleDashboard = () => {
       title: '分配角色',
       dataIndex: 'role',
       key: 'role',
+      width: 120,
       render: (role: string, record: UserWithRole) => (
         <Select
           defaultValue={role}
@@ -874,6 +880,7 @@ const RoleDashboard = () => {
     {
       title: '操作',
       key: 'action',
+      width: 180,
       render: (_: any, record: UserWithRole) => {
         const editable = isEditing(record);
         const phoneEditable = isPhoneEditing(record);
@@ -978,23 +985,21 @@ const RoleDashboard = () => {
   switch (user.role) {
     case 'admin':
       return (
-        <div>
-          <Card title="用户管理中心">
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
-                <Space>
-                  <Button 
-                    type="primary" 
-                    icon={<PlusOutlined />} 
-                    onClick={() => {
-                      userForm.resetFields();
-                      setIsUserModalVisible(true);
-                    }}
-                  >
-                    新建用户
-                  </Button>
-                </Space>
-              </div>
+        <div style={{ height: 'calc(100vh - 64px)', overflow: 'hidden' }}>
+          <Card style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, padding: '0 4px' }}>
+              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold', color: 'rgba(0, 0, 0, 0.85)' }}>用户管理中心</h2>
+              <Button 
+                type="primary" 
+                icon={<PlusOutlined />} 
+                onClick={() => {
+                  userForm.resetFields();
+                  setIsUserModalVisible(true);
+                }}
+                style={{ borderRadius: '4px' }}
+              >
+                新建用户
+              </Button>
             </div>
             
             <Table 
@@ -1005,6 +1010,8 @@ const RoleDashboard = () => {
               pagination={false}
               locale={{ emptyText: '暂无数据' }}
               rowClassName={(record: UserWithRole) => record.role === 'pending' || record.isPending ? 'pending-user-row' : ''}
+              scroll={{ y: 'calc(100vh - 220px)', x: 'max-content' }}
+              style={{ flex: 1 }}
             />
             
             {/* 自定义行样式 */}
@@ -1014,6 +1021,48 @@ const RoleDashboard = () => {
               }
               .pending-user-row:hover td {
                 background-color: rgba(255, 77, 79, 0.1) !important;
+              }
+              .ant-card-body {
+                flex: 1;
+                overflow: hidden;
+                display: flex;
+                flex-direction: column;
+                padding: 16px;
+              }
+              .ant-table-wrapper {
+                flex: 1;
+                height: 100%;
+              }
+              .ant-table {
+                height: 100%;
+              }
+              .ant-table-container {
+                height: 100%;
+                display: flex;
+                flex-direction: column;
+              }
+              .ant-table-body {
+                flex: 1;
+                overflow-y: auto !important;
+              }
+              .ant-spin-nested-loading, 
+              .ant-spin-container {
+                height: 100%;
+                display: flex;
+                flex-direction: column;
+              }
+              ::-webkit-scrollbar {
+                width: 8px;
+              }
+              ::-webkit-scrollbar-thumb {
+                background-color: #bfbfbf;
+                border-radius: 4px;
+              }
+              ::-webkit-scrollbar-track {
+                background-color: #f0f0f0;
+              }
+              body {
+                overflow: hidden;
               }
             `}</style>
         
