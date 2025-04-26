@@ -427,7 +427,7 @@ const ImportCustomers = () => {
         }
         
         // 转换数字字段
-        if (customerData.module_count) {
+        if (customerData.module_count !== undefined && customerData.module_count !== null && customerData.module_count !== '') {
           customerData.module_count = Number(customerData.module_count);
         } else {
           // 如果组件数量为空，明确设置为null
@@ -456,29 +456,104 @@ const ImportCustomers = () => {
           console.log(`客户 ${customerData.customer_name} 的施工队 ${customerData.construction_team} 电话设置为: ${customerData.construction_team_phone || '无'}`);
         }
         
-        // 处理公司字段
-        if (customerData.company) {
-          // 确保公司字段值符合数据库约束 - 必须是'昊尘'或'祐之'
-          if (customerData.company !== '昊尘' && customerData.company !== '祐之') {
-            // 使用默认值
-            customerData.company = '昊尘';
+        // 首先检查是否存在相同客户姓名和电话的数据
+        if (customerData.customer_name && customerData.phone) {
+          console.log(`检查客户 ${customerData.customer_name}, 电话: ${customerData.phone} 是否存在`);
+          
+          // 查询数据库中是否存在相同姓名和电话的客户
+          const { data: existingCustomers, error: queryError } = await supabase
+            .from('customers')
+            .select('*')
+            .eq('customer_name', customerData.customer_name)
+            .eq('phone', customerData.phone);
+          
+          if (queryError) {
+            throw queryError;
           }
-          console.log(`客户 ${customerData.customer_name} 的公司设置为: ${customerData.company}`);
+          
+          console.log(`查询结果: 找到 ${existingCustomers?.length || 0} 个匹配客户`);
+          
+          // 如果存在相同姓名和电话的客户，则更新该客户的信息
+          if (existingCustomers && existingCustomers.length > 0) {
+            const existingCustomer = existingCustomers[0];
+            console.log(`找到现有客户:`, existingCustomer);
+            
+            const updateData: any = {};
+            
+            // 为了调试，先记录现有客户的组件数量
+            console.log(`现有客户 ${existingCustomer.id} 的组件数量: ${existingCustomer.module_count}`);
+            console.log(`导入数据的组件数量(原始): ${customer.module_count}, 类型: ${typeof customer.module_count}`);
+            console.log(`处理后的组件数量: ${customerData.module_count}, 类型: ${typeof customerData.module_count}`);
+            
+            // 遍历新数据的所有字段，仅更新非空字段
+            Object.keys(customerData).forEach(key => {
+              // 特殊处理组件数量字段，确保值为0也能正确更新
+              if (key === 'module_count') {
+                if (customerData[key] !== undefined && customerData[key] !== null && customerData[key] !== '') {
+                  updateData[key] = Number(customerData[key]);
+                  console.log(`将更新组件数量为: ${updateData[key]}, 类型: ${typeof updateData[key]}`);
+                }
+              } 
+              // 处理其他字段
+              else if (
+                customerData[key] !== undefined && 
+                customerData[key] !== null && 
+                (customerData[key] !== '' || customerData[key] === 0)
+              ) {
+                updateData[key] = customerData[key];
+                console.log(`将更新字段 ${key}: ${updateData[key]}`);
+              }
+            });
+            
+            console.log(`更新数据:`, updateData);
+            console.log(`更新条件: id = ${existingCustomer.id}`);
+            
+            // 如果有需要更新的字段，则进行更新
+            if (Object.keys(updateData).length > 0) {
+              const { data: updatedData, error: updateError } = await supabase
+                .from('customers')
+                .update(updateData)
+                .eq('id', existingCustomer.id)
+                .select();
+              
+              if (updateError) {
+                console.error(`更新失败:`, updateError);
+                throw updateError;
+              }
+              
+              console.log(`更新成功:`, updatedData);
+              result.success++;
+              console.log(`更新了客户: ${customerData.customer_name}, 电话: ${customerData.phone}`);
+            } else {
+              result.success++;
+              console.log(`跳过客户: ${customerData.customer_name}, 电话: ${customerData.phone} (无需更新的字段)`);
+            }
+          } else {
+            // 如果不存在相同姓名和电话的客户，则插入新数据
+            const { error } = await supabase
+              .from('customers')
+              .insert(customerData);
+            
+            if (error) {
+              throw error;
+            }
+            
+            result.success++;
+            console.log(`新增客户: ${customerData.customer_name}, 电话: ${customerData.phone}`);
+          }
         } else {
-          // 默认为昊尘
-          customerData.company = '昊尘';
+          // 如果缺少客户姓名或电话，则直接插入
+          const { error } = await supabase
+            .from('customers')
+            .insert(customerData);
+          
+          if (error) {
+            throw error;
+          }
+          
+          result.success++;
+          console.log(`新增客户(无姓名或电话): ${customerData.customer_name || '未知姓名'}`);
         }
-        
-        // 插入数据
-        const { error } = await supabase
-          .from('customers')
-          .insert(customerData);
-        
-        if (error) {
-          throw error;
-        }
-        
-        result.success++;
       } catch (error) {
         console.error('导入数据出错:', error);
         result.failed++;
