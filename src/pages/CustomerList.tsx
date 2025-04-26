@@ -5036,7 +5036,7 @@ const CustomerList = () => {
       <Space>
         <Input
           style={{ width: 200 }}
-          placeholder="搜索客户姓名 (多关键词用空格或逗号分隔)"
+          placeholder="搜索客户姓名 (单个模糊匹配，多个精准匹配)"
           allowClear
           prefix={<SearchOutlined />}
           onChange={(e) => {
@@ -5050,13 +5050,18 @@ const CustomerList = () => {
                 .split(/[\s,，]+/) // 按空格或中英文逗号分隔
                 .filter(keyword => keyword.trim() !== ''); // 过滤掉空字符串
               
-              // 只要包含任一关键词即匹配成功
+              // 多客户姓名搜索精准匹配，单客户姓名搜索模糊匹配
               const filtered = customers.filter(customer => {
                 if (!customer.customer_name) return false;
                 const name = customer.customer_name.toLowerCase();
                 
-                // 对每个关键词进行检查，只要有一个关键词匹配就返回true
-                return keywords.some(keyword => name.includes(keyword));
+                // 单个关键词时使用模糊匹配
+                if (keywords.length === 1) {
+                  return name.includes(keywords[0]);
+                }
+                
+                // 多个关键词时使用精准匹配
+                return keywords.some(keyword => name === keyword);
               });
               
               setFilteredCustomers(filtered);

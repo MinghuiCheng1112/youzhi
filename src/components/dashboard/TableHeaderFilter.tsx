@@ -126,11 +126,19 @@ const TableHeaderFilter: React.FC<TableHeaderFilterProps> = ({
     // 基于搜索文本筛选
     const keywords = searchText.split(/[,\s]+/).filter(Boolean);
     if (keywords.length > 0) {
-      const filtered = validValues.filter(value => 
-        keywords.some(keyword => 
-          value && value.toLowerCase().includes(keyword.toLowerCase())
-        )
-      );
+      const filtered = validValues.filter(value => {
+        if (!value) return false;
+        
+        // 单个关键词时使用模糊匹配
+        if (keywords.length === 1) {
+          return value.toLowerCase().includes(keywords[0].toLowerCase());
+        }
+        
+        // 多个关键词时使用精准匹配
+        return keywords.some(keyword => 
+          value.toLowerCase() === keyword.toLowerCase()
+        );
+      });
       
       setSelectedValues(filtered);
       if (onFilter) {
@@ -182,7 +190,7 @@ const TableHeaderFilter: React.FC<TableHeaderFilterProps> = ({
         <Input
           ref={searchInputRef}
           prefix={<SearchOutlined />}
-          placeholder="搜索包含任一关键字，空格分隔"
+          placeholder="搜索 (单个词模糊匹配，多个词精准匹配)"
           value={searchText}
           onChange={(e) => setSearchText(e.target.value)}
           onPressEnter={handleSearch}
@@ -261,7 +269,7 @@ const TableHeaderFilter: React.FC<TableHeaderFilterProps> = ({
         <Input
           ref={searchInputRef}
           prefix={<SearchOutlined />}
-          placeholder="搜索包含任一关键字，空格分隔"
+          placeholder="搜索 (单个词模糊匹配，多个词精准匹配)"
           value={searchText}
           onChange={(e) => setSearchText(e.target.value)}
           onPressEnter={handleSearch}
